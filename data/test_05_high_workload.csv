@@ -1,0 +1,11 @@
+step_id,task_name,op_type,predecessors,std_duration,time_variance,work_load_score,rework_prob,required_workers,required_tools
+S001,轻松准备,H,,15,2,2,0,1,
+S002,高负荷装配1(REBA=9),A,S001,55,8,9,0,2,装配台
+S003,高负荷装配2(REBA=10),A,S002,60,10,10,0,2,装配台
+S004,中等负荷检测,M,S003,40,6,6,0.1,1,检测台
+S005,高负荷精调(REBA=9),T,S004,50,8,9,0,1,
+S006,高负荷装配3(REBA=8),A,S005,65,10,8,0,2,装配台
+S007,极高负荷测试(REBA=10),M,S006,70,12,10,0.15,2,动平衡机
+S008,高负荷组装(REBA=9),A,S007,80,15,9,0,3,装配台
+S009,轻松记录,D,S008,20,3,3,0,1,
+S010,最终高负荷检验(REBA=8),M,S009,45,7,8,0.1,1,检测台

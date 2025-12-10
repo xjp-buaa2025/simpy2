@@ -1,0 +1,26 @@
+# 航空发动机装配排产仿真系统
+# Aero Engine Assembly Scheduling Simulation System
+
+# Web框架
+fastapi>=0.104.0
+uvicorn>=0.24.0
+python-multipart>=0.0.6
+
+# 数据处理
+pydantic>=2.5.0
+pandas>=2.0.0
+numpy>=1.24.0
+
+# 仿真引擎
+simpy>=4.1.0
+
+# 图算法
+networkx>=3.2.0
+
+# 类型支持
+typing-extensions>=4.8.0
+
+# 开发工具（可选）
+# pytest>=7.4.0
+# black>=23.0.0
+# mypy>=1.7.0
