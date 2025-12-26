@@ -57,6 +57,7 @@ class ProcessNode(BaseModel):
     rework_prob: float = Field(default=0.0, ge=0, le=1, description="返工概率（仅M类有效）")
     required_workers: int = Field(default=1, ge=1, description="所需工人数")
     required_tools: List[str] = Field(default=[], description="所需工具/设备列表")
+    station: str = Field(default="ST01", description="工位ID")
     
     # 前端坐标（用于流程图编辑器）
     x: float = Field(default=0, description="节点X坐标")
@@ -117,20 +118,21 @@ CSV_TEMPLATE_HEADERS = [
     "work_load_score",
     "rework_prob",
     "required_workers",
-    "required_tools"
+    "required_tools",
+    "station"
 ]
 
 CSV_TEMPLATE_EXAMPLE = [
-    ["S001", "取压气机转子", "H", "", "5", "1", "4", "0", "2", "吊装设备"],
-    ["S002", "安装前检查", "M", "S001", "10", "2", "3", "0.05", "1", "检测台"],
-    ["S003", "装配前轴承", "A", "S002", "15", "3", "6", "0", "2", "装配台"],
-    ["S004", "装配后轴承", "A", "S002", "15", "3", "6", "0", "2", "装配台"],
-    ["S005", "安装密封件", "A", "S003;S004", "8", "1.5", "5", "0", "1", ""],
-    ["S006", "动平衡测试", "M", "S005", "30", "5", "4", "0.1", "1", "动平衡机"],
-    ["S007", "记录测试数据", "D", "S006", "5", "0.5", "2", "0", "1", ""],
-    ["S008", "最终装配", "A", "S007", "20", "4", "7", "0", "2", "装配台"],
-    ["S009", "试车准备", "T", "S008", "10", "2", "5", "0", "2", "试车台"],
-    ["S010", "整机试车", "M", "S009", "60", "10", "6", "0.15", "2", "试车台"],
+    ["S001", "取压气机转子", "H", "", "5", "1", "4", "0", "2", "吊装设备", "ST01"],
+    ["S002", "安装前检查", "M", "S001", "10", "2", "3", "0.05", "1", "检测台", "ST02"],
+    ["S003", "装配前轴承", "A", "S002", "15", "3", "6", "0", "2", "装配台", "ST03"],
+    ["S004", "装配后轴承", "A", "S002", "15", "3", "6", "0", "2", "装配台", "ST03"],
+    ["S005", "安装密封件", "A", "S003;S004", "8", "1.5", "5", "0", "1", "", "ST04"],
+    ["S006", "动平衡测试", "M", "S005", "30", "5", "4", "0.1", "1", "动平衡机", "ST05"],
+    ["S007", "记录测试数据", "D", "S006", "5", "0.5", "2", "0", "1", "", "ST06"],
+    ["S008", "最终装配", "A", "S007", "20", "4", "7", "0", "2", "装配台", "ST07"],
+    ["S009", "试车准备", "T", "S008", "10", "2", "5", "0", "2", "试车台", "ST08"],
+    ["S010", "整机试车", "M", "S009", "60", "10", "6", "0.15", "2", "试车台", "ST08"],
 ]
 
 
@@ -215,7 +217,8 @@ async def parse_csv(file: UploadFile = File(...)):
                     work_load_score=int(row.get('work_load_score', 5)),
                     rework_prob=float(row.get('rework_prob', 0)),
                     required_workers=int(row.get('required_workers', 1)),
-                    required_tools=tools
+                    required_tools=tools,
+                    station=row.get('station', 'ST01').strip() or 'ST01'
                 )
                 nodes.append(node)
             except Exception as e:

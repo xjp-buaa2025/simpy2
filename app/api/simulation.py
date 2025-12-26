@@ -73,6 +73,7 @@ class ProcessNode(BaseModel):
     rework_prob: float = Field(default=0.0, ge=0, le=1)
     required_workers: int = Field(default=1, ge=1)
     required_tools: List[str] = []
+    station: str = ""  # 工位ID
     x: float = 0
     y: float = 0
 
@@ -379,7 +380,8 @@ async def run_simulation(request: SimulationRequest, background_tasks: Backgroun
                 work_load_score=node.work_load_score,
                 rework_prob=node.rework_prob,
                 required_workers=node.required_workers,
-                required_tools=node.required_tools
+                required_tools=node.required_tools,
+                station=node.station or "ST01"
             ))
         
         core_process = CoreProcess(
@@ -474,6 +476,30 @@ async def run_simulation(request: SimulationRequest, background_tasks: Backgroun
                 for w in result.worker_stats
             ]
         }
+        
+        # 存储结果到全局字典，供后续API（如瓶颈分析）使用
+        api_result = SimulationResult(
+            sim_id=result.sim_id,
+            status=SimulationStatus.COMPLETED,
+            config=request.config,
+            sim_duration=result.sim_duration,
+            engines_completed=result.engines_completed,
+            target_achievement_rate=result.target_achievement_rate,
+            avg_cycle_time=result.avg_cycle_time,
+            worker_stats=api_worker_stats,
+            equipment_stats=api_equipment_stats,
+            quality_stats=QualityStats(
+                total_inspections=result.quality_stats.total_inspections,
+                total_reworks=result.quality_stats.total_reworks,
+                first_pass_rate=result.quality_stats.first_pass_rate,
+                rework_time_total=result.quality_stats.rework_time_total
+            ),
+            gantt_events=api_gantt_events,
+            time_mapping=result.time_mapping,
+            created_at=result.created_at,
+            completed_at=result.completed_at
+        )
+        simulation_results[result.sim_id] = api_result
         
         return APIResponse(
             success=True,

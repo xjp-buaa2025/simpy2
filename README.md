@@ -159,6 +159,7 @@ source venv/bin/activate  # Linux/Mac
 pip install -r requirements.txt
 
 # 4. 启动服务
+conda activate sim_engine
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 # 5. 访问系统

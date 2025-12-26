@@ -30,6 +30,7 @@ class ProcessNode(BaseModel):
         rework_prob: 返工概率（仅M类有效）
         required_workers: 所需工人数
         required_tools: 所需工具/设备列表
+        station: 工位ID（必填）
         x, y: 前端编辑器坐标
     """
     
@@ -75,6 +76,10 @@ class ProcessNode(BaseModel):
     required_tools: List[str] = Field(
         default=[],
         description="所需工具/设备列表"
+    )
+    station: str = Field(
+        default="ST01",
+        description="工位ID（必填）"
     )
     
     # 前端坐标（用于流程图编辑器）
@@ -169,7 +174,8 @@ class ProcessNode(BaseModel):
             str(self.work_load_score),
             str(self.rework_prob),
             str(self.required_workers),
-            ";".join(self.required_tools)
+            ";".join(self.required_tools),
+            self.station
         ]
     
     class Config:

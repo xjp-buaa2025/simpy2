@@ -1,4 +1,0 @@
-step_id,task_name,op_type,predecessors,std_duration,time_variance,work_load_score,rework_prob,required_workers,required_tools
-S001,示例任务1,H,,30,5,4,0,1,
-S002,示例任务2,A,S001,60,10,6,0,2,装配台
-S003,示例任务3,M,S002,45,8,5,0.05,1,检测台

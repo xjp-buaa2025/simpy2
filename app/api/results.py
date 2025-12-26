@@ -9,6 +9,7 @@ API端点:
 - POST /api/results/export/report: 导出完整报告
 - GET /api/results/{sim_id}/gantt: 获取甘特图数据（支持时间筛选）
 - GET /api/results/{sim_id}/kpi: 获取KPI指标
+- GET /api/results/{sim_id}/bottleneck: 获取瓶颈分析
 """
 
 import os
@@ -291,6 +292,39 @@ async def get_kpi_data(sim_id: str):
     )
 
 
+@router.get("/{sim_id}/bottleneck", response_model=APIResponse)
+async def get_bottleneck_analysis(sim_id: str):
+    """
+    获取瓶颈分析
+    
+    分析生产过程中的瓶颈，包括：
+    - 设备瓶颈（高利用率设备）
+    - 工人瓶颈（高负荷工人）
+    - 等待时间瓶颈（长等待任务）
+    - 返工瓶颈（高返工率任务）
+    
+    返回瓶颈列表、汇总和改进建议
+    """
+    if sim_id not in simulation_results:
+        return APIResponse(
+            success=False,
+            message=f"仿真结果 {sim_id} 不存在"
+        )
+    
+    result = simulation_results[sim_id]
+    
+    # 使用统计模块的瓶颈分析
+    from app.utils.statistics import analyze_bottlenecks
+    
+    analysis = analyze_bottlenecks(result)
+    
+    return APIResponse(
+        success=True,
+        message=f"识别到 {len(analysis.bottlenecks)} 个瓶颈",
+        data=analysis.to_dict()
+    )
+
+
 @router.post("/export/gantt")
 async def export_gantt_csv(request: GanttExportRequest):
     """
@@ -383,6 +417,10 @@ async def export_report(sim_id: str):
     result = simulation_results[sim_id]
     work_hours = result.config.work_hours_per_day
     
+    # 获取瓶颈分析
+    from app.utils.statistics import analyze_bottlenecks
+    bottleneck_analysis = analyze_bottlenecks(result)
+    
     # 构建报告
     report = {
         "report_info": {
@@ -402,6 +440,7 @@ async def export_report(sim_id: str):
         "quality_stats": result.quality_stats.model_dump(),
         "worker_stats": [w.model_dump() for w in result.worker_stats],
         "equipment_stats": [e.model_dump() for e in result.equipment_stats],
+        "bottleneck_analysis": bottleneck_analysis.to_dict(),
         "gantt_events_count": len(result.gantt_events)
     }
     
@@ -457,7 +496,7 @@ async def get_equipment_stats(sim_id: str):
     """
     获取设备统计数据
     
-    返回各设备的利用率详细数据
+    返回各设备的利用率详细数据，包括关键设备和无限制设备
     """
     if sim_id not in simulation_results:
         return APIResponse(
@@ -469,19 +508,40 @@ async def get_equipment_stats(sim_id: str):
     
     # 格式化设备统计
     equipment_data = []
+    critical_equipment = []
+    unlimited_equipment = []
+    
     for stat in result.equipment_stats:
-        equipment_data.append({
+        item = {
             "equipment_name": stat.resource_id,
             "work_time_hours": round(stat.work_time / 60, 2),
             "idle_time_hours": round(stat.idle_time / 60, 2),
             "utilization_rate": round(stat.utilization_rate * 100, 1),
-            "tasks_served": stat.tasks_completed
-        })
+            "tasks_served": stat.tasks_completed,
+            "is_unlimited": getattr(stat, 'is_unlimited', False),
+            "is_bottleneck": stat.utilization_rate > 0.8
+        }
+        equipment_data.append(item)
+        
+        if getattr(stat, 'is_unlimited', False):
+            unlimited_equipment.append(item)
+        else:
+            critical_equipment.append(item)
     
     return APIResponse(
         success=True,
         message="获取设备统计成功",
-        data=equipment_data
+        data={
+            "all": equipment_data,
+            "critical": critical_equipment,
+            "unlimited": unlimited_equipment,
+            "summary": {
+                "total_count": len(equipment_data),
+                "critical_count": len(critical_equipment),
+                "unlimited_count": len(unlimited_equipment),
+                "bottleneck_count": len([e for e in equipment_data if e["is_bottleneck"]])
+            }
+        }
     )
 
 

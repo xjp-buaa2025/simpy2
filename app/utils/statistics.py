@@ -7,9 +7,11 @@ KPI统计计算工具
 - 一次通过率计算
 - 周期时间统计
 - 综合KPI汇总
+- 瓶颈识别与分析
 """
 
 from typing import List, Dict, Any, Optional
+from dataclasses import dataclass, field
 from app.models.result_model import SimulationResult, ResourceUtilization, QualityStats
 from app.models.gantt_model import GanttEvent
 from app.models.enums import GanttEventType
@@ -291,9 +293,429 @@ def calculate_event_statistics(events: List[GanttEvent]) -> Dict[str, Any]:
     }
 
 
+# ============ 瓶颈分析功能 ============
+
+@dataclass
+class BottleneckInfo:
+    """瓶颈信息"""
+    resource_type: str  # "worker" 或 "equipment" 或 "task"
+    resource_id: str
+    bottleneck_type: str  # "high_utilization", "long_wait", "frequent_queue", "critical_path"
+    severity: str  # "high", "medium", "low"
+    utilization_rate: float = 0
+    wait_time: float = 0
+    queue_time: float = 0
+    impact_description: str = ""
+    suggestion: str = ""
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "resource_type": self.resource_type,
+            "resource_id": self.resource_id,
+            "bottleneck_type": self.bottleneck_type,
+            "severity": self.severity,
+            "utilization_rate": self.utilization_rate,
+            "wait_time": self.wait_time,
+            "queue_time": self.queue_time,
+            "impact_description": self.impact_description,
+            "suggestion": self.suggestion
+        }
+
+
+@dataclass
+class BottleneckAnalysis:
+    """瓶颈分析结果"""
+    bottlenecks: List[BottleneckInfo] = field(default_factory=list)
+    summary: Dict[str, Any] = field(default_factory=dict)
+    recommendations: List[str] = field(default_factory=list)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "bottlenecks": [b.to_dict() for b in self.bottlenecks],
+            "summary": self.summary,
+            "recommendations": self.recommendations
+        }
+
+
+def analyze_bottlenecks(result: SimulationResult) -> BottleneckAnalysis:
+    """
+    分析生产瓶颈
+    
+    分析维度：
+    1. 设备利用率瓶颈（高利用率设备）
+    2. 工人利用率瓶颈（高利用率工人）
+    3. 等待时间瓶颈（长等待的任务）
+    4. 返工瓶颈（高返工率任务）
+    5. 资源竞争瓶颈
+    
+    Args:
+        result: 仿真结果
+        
+    Returns:
+        瓶颈分析结果
+    """
+    analysis = BottleneckAnalysis()
+    bottlenecks = []
+    recommendations = []
+    
+    # 1. 分析设备瓶颈
+    equipment_bottlenecks = _analyze_equipment_bottlenecks(result)
+    bottlenecks.extend(equipment_bottlenecks)
+    
+    # 2. 分析工人瓶颈
+    worker_bottlenecks = _analyze_worker_bottlenecks(result)
+    bottlenecks.extend(worker_bottlenecks)
+    
+    # 3. 分析等待时间瓶颈
+    wait_bottlenecks = _analyze_wait_time_bottlenecks(result)
+    bottlenecks.extend(wait_bottlenecks)
+    
+    # 4. 分析返工瓶颈
+    rework_bottlenecks = _analyze_rework_bottlenecks(result)
+    bottlenecks.extend(rework_bottlenecks)
+    
+    # 按严重程度排序
+    severity_order = {"high": 0, "medium": 1, "low": 2}
+    bottlenecks.sort(key=lambda x: severity_order.get(x.severity, 3))
+    
+    analysis.bottlenecks = bottlenecks
+    
+    # 生成汇总
+    analysis.summary = _generate_bottleneck_summary(bottlenecks, result)
+    
+    # 生成建议
+    analysis.recommendations = _generate_recommendations(bottlenecks, result)
+    
+    return analysis
+
+
+def _analyze_equipment_bottlenecks(result: SimulationResult) -> List[BottleneckInfo]:
+    """分析设备瓶颈"""
+    bottlenecks = []
+    
+    for equip in result.equipment_stats:
+        # 跳过无限制设备
+        if hasattr(equip, 'is_unlimited') and equip.is_unlimited:
+            continue
+            
+        util_rate = equip.utilization_rate
+        
+        if util_rate >= 0.9:
+            severity = "high"
+            impact = f"设备 {equip.resource_id} 利用率高达 {util_rate*100:.1f}%，严重制约产能"
+            suggestion = f"建议增加 {equip.resource_id} 数量或优化使用该设备的工序"
+        elif util_rate >= 0.8:
+            severity = "medium"
+            impact = f"设备 {equip.resource_id} 利用率 {util_rate*100:.1f}%，接近满负荷"
+            suggestion = f"关注 {equip.resource_id} 使用情况，必要时考虑增加设备"
+        elif util_rate >= 0.7:
+            severity = "low"
+            impact = f"设备 {equip.resource_id} 利用率 {util_rate*100:.1f}%，负荷较高"
+            suggestion = f"可考虑优化 {equip.resource_id} 的使用调度"
+        else:
+            continue
+        
+        bottlenecks.append(BottleneckInfo(
+            resource_type="equipment",
+            resource_id=equip.resource_id,
+            bottleneck_type="high_utilization",
+            severity=severity,
+            utilization_rate=util_rate,
+            impact_description=impact,
+            suggestion=suggestion
+        ))
+    
+    return bottlenecks
+
+
+def _analyze_worker_bottlenecks(result: SimulationResult) -> List[BottleneckInfo]:
+    """分析工人瓶颈"""
+    bottlenecks = []
+    
+    utilizations = [w.utilization_rate for w in result.worker_stats]
+    if not utilizations:
+        return bottlenecks
+    
+    avg_util = sum(utilizations) / len(utilizations)
+    max_util = max(utilizations)
+    
+    # 检查整体工人负荷
+    if avg_util >= 0.85:
+        bottlenecks.append(BottleneckInfo(
+            resource_type="worker",
+            resource_id="全体工人",
+            bottleneck_type="high_utilization",
+            severity="high",
+            utilization_rate=avg_util,
+            impact_description=f"工人平均利用率高达 {avg_util*100:.1f}%，整体负荷过重",
+            suggestion="建议增加工人数量以提高产能和降低疲劳风险"
+        ))
+    elif avg_util >= 0.75:
+        bottlenecks.append(BottleneckInfo(
+            resource_type="worker",
+            resource_id="全体工人",
+            bottleneck_type="high_utilization",
+            severity="medium",
+            utilization_rate=avg_util,
+            impact_description=f"工人平均利用率 {avg_util*100:.1f}%，负荷较高",
+            suggestion="关注工人疲劳情况，考虑优化排班或增加人员"
+        ))
+    
+    # 检查个别工人负荷不均
+    for worker in result.worker_stats:
+        if worker.utilization_rate >= 0.9:
+            bottlenecks.append(BottleneckInfo(
+                resource_type="worker",
+                resource_id=worker.resource_id,
+                bottleneck_type="high_utilization",
+                severity="medium",
+                utilization_rate=worker.utilization_rate,
+                impact_description=f"工人 {worker.resource_id} 利用率 {worker.utilization_rate*100:.1f}%，负荷过重",
+                suggestion=f"优化任务分配，减轻 {worker.resource_id} 的工作负担"
+            ))
+    
+    return bottlenecks
+
+
+def _analyze_wait_time_bottlenecks(result: SimulationResult) -> List[BottleneckInfo]:
+    """分析等待时间瓶颈"""
+    bottlenecks = []
+    
+    # 统计各任务的等待时间
+    wait_events = [e for e in result.gantt_events if e.event_type == GanttEventType.WAITING]
+    
+    if not wait_events:
+        return bottlenecks
+    
+    # 按任务步骤统计等待时间
+    step_wait_times: Dict[str, List[float]] = {}
+    for event in wait_events:
+        step_id = event.step_id
+        wait_time = event.end_time - event.start_time
+        if step_id not in step_wait_times:
+            step_wait_times[step_id] = []
+        step_wait_times[step_id].append(wait_time)
+    
+    # 找出等待时间长的任务
+    total_sim_time = result.sim_duration
+    for step_id, wait_times in step_wait_times.items():
+        avg_wait = sum(wait_times) / len(wait_times)
+        total_wait = sum(wait_times)
+        
+        # 如果平均等待时间超过30分钟或总等待占总时长5%以上
+        if avg_wait >= 30 or total_wait / total_sim_time >= 0.05:
+            severity = "high" if avg_wait >= 60 else "medium"
+            
+            # 找出对应的任务名
+            task_name = step_id
+            for event in result.gantt_events:
+                if event.step_id == step_id:
+                    task_name = event.task_name.replace("(等待)", "").strip()
+                    break
+            
+            bottlenecks.append(BottleneckInfo(
+                resource_type="task",
+                resource_id=step_id,
+                bottleneck_type="long_wait",
+                severity=severity,
+                wait_time=avg_wait,
+                impact_description=f"任务 '{task_name}' 平均等待时间 {avg_wait:.1f} 分钟，总等待 {total_wait:.1f} 分钟",
+                suggestion=f"检查任务 '{task_name}' 所需资源是否充足，优化前置任务调度"
+            ))
+    
+    return bottlenecks
+
+
+def _analyze_rework_bottlenecks(result: SimulationResult) -> List[BottleneckInfo]:
+    """分析返工瓶颈"""
+    bottlenecks = []
+    
+    rework_events = [e for e in result.gantt_events if e.event_type == GanttEventType.REWORK]
+    
+    if not rework_events:
+        return bottlenecks
+    
+    # 按任务统计返工次数和时间
+    step_rework_info: Dict[str, Dict] = {}
+    for event in rework_events:
+        step_id = event.step_id
+        if step_id not in step_rework_info:
+            step_rework_info[step_id] = {
+                "count": 0,
+                "total_time": 0,
+                "task_name": event.task_name.replace("(返工", "").replace(")", "").strip()
+            }
+        step_rework_info[step_id]["count"] += 1
+        step_rework_info[step_id]["total_time"] += (event.end_time - event.start_time)
+    
+    # 找出返工严重的任务
+    for step_id, info in step_rework_info.items():
+        if info["count"] >= 3 or info["total_time"] >= 60:
+            severity = "high" if info["count"] >= 5 else "medium"
+            
+            bottlenecks.append(BottleneckInfo(
+                resource_type="task",
+                resource_id=step_id,
+                bottleneck_type="frequent_rework",
+                severity=severity,
+                wait_time=info["total_time"],
+                impact_description=f"任务 '{info['task_name']}' 返工 {info['count']} 次，耗时 {info['total_time']:.1f} 分钟",
+                suggestion=f"检查任务 '{info['task_name']}' 的质量控制流程，考虑增加前置检验或改进工艺"
+            ))
+    
+    return bottlenecks
+
+
+def _generate_bottleneck_summary(
+    bottlenecks: List[BottleneckInfo], 
+    result: SimulationResult
+) -> Dict[str, Any]:
+    """生成瓶颈汇总"""
+    
+    high_count = len([b for b in bottlenecks if b.severity == "high"])
+    medium_count = len([b for b in bottlenecks if b.severity == "medium"])
+    low_count = len([b for b in bottlenecks if b.severity == "low"])
+    
+    # 按类型统计
+    equipment_bottlenecks = [b for b in bottlenecks if b.resource_type == "equipment"]
+    worker_bottlenecks = [b for b in bottlenecks if b.resource_type == "worker"]
+    task_bottlenecks = [b for b in bottlenecks if b.resource_type == "task"]
+    
+    # 主要瓶颈类型
+    main_bottleneck_type = "none"
+    if high_count > 0:
+        high_bottlenecks = [b for b in bottlenecks if b.severity == "high"]
+        if any(b.resource_type == "equipment" for b in high_bottlenecks):
+            main_bottleneck_type = "equipment"
+        elif any(b.resource_type == "worker" for b in high_bottlenecks):
+            main_bottleneck_type = "worker"
+        else:
+            main_bottleneck_type = "task"
+    
+    return {
+        "total_bottlenecks": len(bottlenecks),
+        "by_severity": {
+            "high": high_count,
+            "medium": medium_count,
+            "low": low_count
+        },
+        "by_type": {
+            "equipment": len(equipment_bottlenecks),
+            "worker": len(worker_bottlenecks),
+            "task": len(task_bottlenecks)
+        },
+        "main_bottleneck_type": main_bottleneck_type,
+        "production_status": _get_production_status(result),
+        "efficiency_score": _calculate_efficiency_score(result, bottlenecks)
+    }
+
+
+def _get_production_status(result: SimulationResult) -> str:
+    """获取生产状态描述"""
+    rate = result.target_achievement_rate
+    if rate >= 1.0:
+        return "超额完成"
+    elif rate >= 0.9:
+        return "基本完成"
+    elif rate >= 0.7:
+        return "未达标"
+    else:
+        return "严重不足"
+
+
+def _calculate_efficiency_score(
+    result: SimulationResult, 
+    bottlenecks: List[BottleneckInfo]
+) -> float:
+    """计算效率评分（0-100）"""
+    score = 100.0
+    
+    # 根据达成率扣分
+    if result.target_achievement_rate < 1.0:
+        score -= (1.0 - result.target_achievement_rate) * 30
+    
+    # 根据瓶颈数量扣分
+    high_count = len([b for b in bottlenecks if b.severity == "high"])
+    medium_count = len([b for b in bottlenecks if b.severity == "medium"])
+    score -= high_count * 10
+    score -= medium_count * 5
+    
+    # 根据返工率扣分
+    if result.quality_stats.first_pass_rate < 0.9:
+        score -= (0.9 - result.quality_stats.first_pass_rate) * 20
+    
+    return max(0, min(100, score))
+
+
+def _generate_recommendations(
+    bottlenecks: List[BottleneckInfo], 
+    result: SimulationResult
+) -> List[str]:
+    """生成改进建议"""
+    recommendations = []
+    
+    # 高优先级瓶颈的建议
+    high_bottlenecks = [b for b in bottlenecks if b.severity == "high"]
+    
+    # 设备瓶颈建议
+    equip_bottlenecks = [b for b in high_bottlenecks if b.resource_type == "equipment"]
+    if equip_bottlenecks:
+        equip_names = [b.resource_id for b in equip_bottlenecks]
+        recommendations.append(
+            f"【优先】增加关键设备容量：{', '.join(equip_names)}。"
+            f"这些设备利用率过高，是当前主要产能瓶颈。"
+        )
+    
+    # 工人瓶颈建议
+    worker_bottlenecks = [b for b in high_bottlenecks if b.resource_type == "worker"]
+    if worker_bottlenecks:
+        recommendations.append(
+            "【优先】增加工人数量或优化排班。"
+            "当前工人负荷过重，可能影响产能和质量。"
+        )
+    
+    # 返工瓶颈建议
+    rework_bottlenecks = [b for b in bottlenecks if b.bottleneck_type == "frequent_rework"]
+    if rework_bottlenecks:
+        task_names = [b.resource_id for b in rework_bottlenecks[:3]]
+        recommendations.append(
+            f"【质量】关注高返工率任务：{', '.join(task_names)}。"
+            f"建议加强质量控制或改进工艺流程。"
+        )
+    
+    # 等待时间瓶颈建议
+    wait_bottlenecks = [b for b in bottlenecks if b.bottleneck_type == "long_wait"]
+    if wait_bottlenecks:
+        recommendations.append(
+            "【调度】存在较长等待时间的任务，建议优化生产调度或增加相关资源。"
+        )
+    
+    # 达成率建议
+    if result.target_achievement_rate < 0.9:
+        gap = result.config.target_output - result.engines_completed
+        recommendations.append(
+            f"【产量】当前产量缺口 {gap} 台，建议综合以上措施提升产能。"
+        )
+    
+    # 如果没有明显瓶颈
+    if not bottlenecks:
+        if result.target_achievement_rate >= 1.0:
+            recommendations.append(
+                "【良好】当前生产状态良好，无明显瓶颈。"
+                "可考虑提高目标产量或进一步优化资源配置。"
+            )
+        else:
+            recommendations.append(
+                "【分析】未检测到明显瓶颈，但产量未达标。"
+                "建议检查工艺流程设计或增加仿真时长。"
+            )
+    
+    return recommendations
+
+
 def generate_kpi_report(result: SimulationResult) -> Dict[str, Any]:
     """
-    生成完整的KPI报告
+    生成完整的KPI报告（包含瓶颈分析）
     
     Args:
         result: 仿真结果
@@ -302,6 +724,7 @@ def generate_kpi_report(result: SimulationResult) -> Dict[str, Any]:
         完整KPI报告
     """
     kpi = calculate_kpi(result)
+    bottleneck_analysis = analyze_bottlenecks(result)
     
     return {
         "summary": {
@@ -323,5 +746,6 @@ def generate_kpi_report(result: SimulationResult) -> Dict[str, Any]:
             result.sim_duration
         ),
         "quality": kpi["quality"],
-        "events": calculate_event_statistics(result.gantt_events)
+        "events": calculate_event_statistics(result.gantt_events),
+        "bottleneck_analysis": bottleneck_analysis.to_dict()
     }
