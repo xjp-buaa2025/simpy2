@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initToolbox();
     initConfig();
     initStationFilter();
+    initAnimations();
     
     // 窗口大小变化时重新计算甘特图
     window.addEventListener('resize', () => {

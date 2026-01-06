@@ -63,6 +63,23 @@ class EquipmentManager:
             self.usage_log[equip_name] = []
             self.current_usage[equip_name] = 0
     
+    def has_equipment(self, name: str) -> bool:
+        """
+        检查是否已管理该设备
+        """
+        return name in self.critical_equipment
+
+    def add_dynamic_equipment(self, name: str, capacity: int):
+        """
+        动态添加关键设备
+        """
+        if name not in self.critical_equipment:
+            self.critical_equipment[name] = simpy.PriorityResource(
+                self.env, capacity=capacity
+            )
+            self.usage_log[name] = []
+            self.current_usage[name] = 0
+
     def is_critical(self, tool_name: str) -> bool:
         """
         判断是否为关键设备

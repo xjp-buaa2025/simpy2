@@ -109,3 +109,19 @@ function removeEquipment(name) {
     renderEquipmentList();
     showToast('设备已删除', 'success');
 }
+
+// 入场动画初始化：为卡片与通用容器添加淡入与上浮效果
+function initAnimations() {
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.classList.add('animate-visible');
+            }
+        });
+    }, { threshold: 0.1 });
+    
+    document.querySelectorAll('.kpi-card, .card').forEach(el => {
+        el.classList.add('animate-initial');
+        observer.observe(el);
+    });
+}

@@ -99,6 +99,10 @@ class GlobalConfig(BaseModel):
         default=True,
         description="是否启用流水线模式（多台并行）"
     )
+    station_constraint_mode: bool = Field(
+        default=False,
+        description="是否启用工位资源限制（工位内强制串行）"
+    )
     random_seed: Optional[int] = Field(
         default=None,
         description="随机种子（用于复现结果，None为随机）"

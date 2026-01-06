@@ -42,24 +42,7 @@ class OpType(str, Enum):
 
 # ============ 数据模型 ============
 
-class GlobalConfig(BaseModel):
-    """全局配置模型"""
-    work_hours_per_day: int = Field(default=8, ge=1, le=24)
-    work_days_per_month: int = Field(default=22, ge=1, le=31)
-    num_workers: int = Field(default=6, ge=1)
-    critical_equipment: Dict[str, int] = Field(
-        default={"动平衡机": 2, "试车台": 1, "装配台": 3, "检测台": 2}
-    )
-    rest_time_threshold: float = Field(default=50.0, ge=0)
-    rest_duration_time: float = Field(default=5.0, ge=0)
-    rest_load_threshold: int = Field(default=7, ge=1, le=10)
-    rest_duration_load: float = Field(default=3.0, ge=0)
-    target_output: int = Field(default=3, ge=1)
-    
-    @property
-    def sim_time_minutes(self) -> float:
-        return self.work_hours_per_day * 60 * self.work_days_per_month
-
+from app.models.config_model import GlobalConfig
 
 class ProcessNode(BaseModel):
     """工艺节点模型"""
@@ -348,24 +331,12 @@ async def run_simulation(request: SimulationRequest, background_tasks: Backgroun
         
         # 导入真实仿真引擎
         from app.core.simulation_engine import SimulationEngine, SimulationEngineNoRest
-        from app.models.config_model import GlobalConfig as CoreConfig
         from app.models.process_model import ProcessDefinition as CoreProcess, ProcessNode as CoreNode
         from app.models.enums import OpType as CoreOpType
         
         # 转换配置
-        core_config = CoreConfig(
-            work_hours_per_day=request.config.work_hours_per_day,
-            work_days_per_month=request.config.work_days_per_month,
-            num_workers=request.config.num_workers,
-            target_output=request.config.target_output,
-            critical_equipment=request.config.critical_equipment,
-            rest_time_threshold=request.config.rest_time_threshold,
-            rest_duration_time=request.config.rest_duration_time,
-            rest_load_threshold=request.config.rest_load_threshold,
-            rest_duration_load=request.config.rest_duration_load,
-            pipeline_mode=True,
-            random_seed=42
-        )
+        core_config = request.config
+        core_config.random_seed = 42
         
         # 转换工艺流程
         core_nodes = []

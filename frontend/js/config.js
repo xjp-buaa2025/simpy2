@@ -58,5 +58,7 @@ const DEFAULT_CONFIG = {
     restTimeThreshold: 50,
     restDurationTime: 5,
     restLoadThreshold: 7,
-    restDurationLoad: 3
+    restDurationLoad: 3,
+    pipelineMode: true,
+    stationConstraintMode: false
 };

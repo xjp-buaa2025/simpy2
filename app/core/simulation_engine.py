@@ -96,6 +96,10 @@ class SimulationEngine:
         if not valid:
             return self._create_failed_result(msg)
         
+        # 处理工位资源限制模式
+        if self.config.station_constraint_mode:
+            self._apply_station_constraints()
+        
         # 启动流水线控制器
         if self.config.pipeline_mode:
             self.env.process(self._pipeline_controller())
@@ -109,6 +113,38 @@ class SimulationEngine:
         # 收集结果
         return self._collect_results()
     
+    def _apply_station_constraints(self):
+        """
+        应用工位资源限制
+        
+        1. 将所有工位添加为关键设备（容量=1）
+        2. 将工位名称添加到对应任务的required_tools中
+        """
+        # 收集所有工位
+        all_stations = set()
+        for node in self.process.nodes:
+            if node.station:
+                all_stations.add(node.station)
+        
+        # 将工位添加为关键设备（如果不存在）
+        for station in all_stations:
+            # 只有当设备管理器中不存在该设备时才添加
+            # 这样用户可以在配置中手动覆盖工位容量（例如设置某个工位容量为2）
+            if not self.equipment_mgr.has_equipment(station):
+                # 这里的add_equipment是动态添加，需要确保EquipmentManager支持
+                # EquipmentManager在初始化时已经读取了config，所以我们需要直接操作env中的资源
+                # 但最好的方式是更新config并重新初始化EquipmentManager，或者直接在EquipmentManager中添加
+                # 由于EquipmentManager已经初始化，我们调用其动态添加方法
+                # 注意：config中的critical_equipment也需要同步更新，以便后续统计
+                self.config.add_equipment(station, 1)
+                self.equipment_mgr.add_dynamic_equipment(station, 1)
+        
+        # 将工位添加到任务所需工具
+        for node in self.process.nodes:
+            if node.station:
+                if node.station not in node.required_tools:
+                    node.required_tools.append(node.station)
+
     def _pipeline_controller(self) -> Generator:
         """
         流水线控制器
@@ -146,15 +182,26 @@ class SimulationEngine:
                 # 等待资源
                 yield self.env.timeout(10)
     
-    def _single_engine_process(self, engine_id: int) -> Generator:
+    def _single_engine_process(self, start_engine_id: int) -> Generator:
         """
-        单台发动机模式
+        单台发动机模式（串行生产）
+        
+        一台接一台地生产，直到达到目标产量或时间耗尽
         
         Args:
-            engine_id: 发动机编号
+            start_engine_id: 起始发动机编号
         """
-        self.engine_start_times[engine_id] = self.env.now
-        yield from self._engine_process(engine_id)
+        engine_id = start_engine_id
+        max_engines = self.config.target_output + 1  # 目标产量
+        
+        while engine_id <= max_engines and self.env.now < self.config.sim_time_minutes:
+            self.engine_start_times[engine_id] = self.env.now
+            
+            # 等待当前发动机完全生产结束
+            yield from self._engine_process(engine_id)
+            
+            # 准备下一台
+            engine_id += 1
     
     def _engine_process(self, engine_id: int) -> Generator:
         """
@@ -393,6 +440,7 @@ class SimulationEngineNoRest:
             rest_load_threshold=10,  # 使用最大合法值
             rest_duration_load=0,  # 休息时长为0
             pipeline_mode=config.pipeline_mode,
+            station_constraint_mode=config.station_constraint_mode,
             random_seed=config.random_seed
         )
         self.process = process
@@ -428,6 +476,10 @@ class SimulationEngineNoRest:
         if not valid:
             return {"error": msg}
         
+        # 处理工位资源限制模式
+        if self.config.station_constraint_mode:
+            self._apply_station_constraints()
+        
         if self.config.pipeline_mode:
             self.env.process(self._pipeline_controller())
         else:
@@ -436,6 +488,25 @@ class SimulationEngineNoRest:
         self.env.run(until=self.config.sim_time_minutes)
         
         return self._collect_simple_results()
+
+    def _apply_station_constraints(self):
+        """
+        应用工位资源限制
+        """
+        all_stations = set()
+        for node in self.process.nodes:
+            if node.station:
+                all_stations.add(node.station)
+        
+        for station in all_stations:
+            if not self.equipment_mgr.has_equipment(station):
+                self.config.add_equipment(station, 1)
+                self.equipment_mgr.add_dynamic_equipment(station, 1)
+        
+        for node in self.process.nodes:
+            if node.station:
+                if node.station not in node.required_tools:
+                    node.required_tools.append(node.station)
     
     def _pipeline_controller(self) -> Generator:
         """流水线控制器"""
@@ -461,10 +532,15 @@ class SimulationEngineNoRest:
             else:
                 yield self.env.timeout(10)
     
-    def _single_engine_process(self, engine_id: int) -> Generator:
-        """单台发动机模式"""
-        self.engine_start_times[engine_id] = self.env.now
-        yield from self._engine_process(engine_id)
+    def _single_engine_process(self, start_engine_id: int) -> Generator:
+        """单台发动机模式（串行生产）"""
+        engine_id = start_engine_id
+        max_engines = self.config.target_output + 1
+        
+        while engine_id <= max_engines and self.env.now < self.config.sim_time_minutes:
+            self.engine_start_times[engine_id] = self.env.now
+            yield from self._engine_process(engine_id)
+            engine_id += 1
     
     def _engine_process(self, engine_id: int) -> Generator:
         """单台发动机生产流程"""

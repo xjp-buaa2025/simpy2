@@ -2,6 +2,12 @@
  * 图表模块 - 疲劳图表、甘特图
  */
 
+// 全局主题优化：统一文字与边框颜色
+if (window.Chart) {
+    Chart.defaults.color = '#9ca3af';
+    Chart.defaults.borderColor = '#374151';
+}
+
 function updateFatigueChart() {
     if (!state.simulationResult) return;
     
@@ -76,14 +82,14 @@ function updateFatigueChart() {
                     type: 'linear',
                     title: { display: true, text: '时间（分钟）', color: '#9ca3af' },
                     ticks: { color: '#9ca3af' }, 
-                    grid: { color: '#374151' } 
+                    grid: { display: false } 
                 },
                 y: { 
                     min: 0, 
                     max: 100,
                     title: { display: true, text: '疲劳度', color: '#9ca3af' },
                     ticks: { color: '#9ca3af' }, 
-                    grid: { color: '#374151' } 
+                    grid: { display: false } 
                 }
             },
             plugins: { 

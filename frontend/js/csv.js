@@ -93,6 +93,8 @@ function getConfigFromUI() {
         rest_time_threshold: parseInt(document.getElementById('restTimeThreshold').value),
         rest_duration_time: parseInt(document.getElementById('restDurationTime').value),
         rest_load_threshold: parseInt(document.getElementById('restLoadThreshold').value),
-        rest_duration_load: parseInt(document.getElementById('restDurationLoad').value)
+        rest_duration_load: parseInt(document.getElementById('restDurationLoad').value),
+        pipeline_mode: document.getElementById('pipelineMode').checked,
+        station_constraint_mode: document.getElementById('stationConstraintMode').checked
     };
 }
