@@ -1,5 +1,11 @@
 # 航空发动机装配排产仿真系统
 
+2026-10-21 更新：同一工区的工序始终串行，覆盖不同发动机、不同工位及新增资源套数；工序等待设备、休息和返工期间仍保留工区占用，不同工区可并行。排队时优先推进先投产发动机。历史 `station_constraint_mode=false` 不会关闭该规则。首页自动优先展示已有仿真结果，无结果时使用默认展示数据。
+
+支持导入 CSV/XLSX 工艺文件，并按统一工位编号显示网页工区。仿真结果新增按工位、发动机和仿真时间查询的放行进度，Unity 接口及数据结构见 [工艺文件导入与工位进度](docs/STATION_PROGRESS.md)。
+
+2026-10-20 更新：人员统一按需供给，不再按配置人数等待；休息仍会延迟工序完成。目标产出不再参与投产或评价，界面改为实际产出、累计人分钟与峰值同时作业人数。旧方案人数和目标字段接受但忽略，详见 [按需人员口径](docs/ON_DEMAND_WORKERS.md)。
+
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.9+-blue.svg" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.100+-green.svg" alt="FastAPI">

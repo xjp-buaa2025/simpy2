@@ -20,51 +20,7 @@ router = APIRouter()
 
 # ============ 请求/响应模型 ============
 
-class GlobalConfig(BaseModel):
-    """全局配置模型"""
-    work_hours_per_day: int = Field(default=8, ge=1, le=24, description="每日工作小时数")
-    work_days_per_month: int = Field(default=22, ge=1, le=31, description="每月工作天数")
-    num_workers: int = Field(default=6, ge=1, description="工人数量")
-    
-    # 关键设备配置（前端自定义）
-    critical_equipment: Dict[str, int] = Field(
-        default={"动平衡机": 2, "试车台": 1, "装配台": 3, "检测台": 2},
-        description="关键设备及数量"
-    )
-    
-    # 休息规则参数
-    rest_time_threshold: float = Field(default=50.0, ge=0, description="连续工作触发休息阈值（分钟）")
-    rest_duration_time: float = Field(default=5.0, ge=0, description="时间触发休息时长（分钟）")
-    rest_load_threshold: int = Field(default=7, ge=1, le=10, description="负荷触发休息阈值（REBA 1-10）")
-    rest_duration_load: float = Field(default=3.0, ge=0, description="负荷触发休息时长（分钟）")
-    
-    # 生产目标
-    target_output: int = Field(default=3, ge=1, description="目标月产量（台）")
-    
-    @property
-    def sim_time_minutes(self) -> float:
-        """计算仿真总时长（分钟）"""
-        return self.work_hours_per_day * 60 * self.work_days_per_month
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "work_hours_per_day": 8,
-                "work_days_per_month": 22,
-                "num_workers": 6,
-                "critical_equipment": {
-                    "动平衡机": 2,
-                    "试车台": 1,
-                    "装配台": 3,
-                    "检测台": 2
-                },
-                "rest_time_threshold": 50.0,
-                "rest_duration_time": 5.0,
-                "rest_load_threshold": 7,
-                "rest_duration_load": 3.0,
-                "target_output": 3
-            }
-        }
+from app.models.config_model import GlobalConfig
 
 
 class APIResponse(BaseModel):
@@ -140,9 +96,6 @@ async def validate_config(config: GlobalConfig):
     if config.work_hours_per_day > 12:
         warnings.append(f"每日工作时间 {config.work_hours_per_day} 小时可能过长")
     
-    # 检查工人数量
-    if config.num_workers < 2:
-        warnings.append("工人数量过少，可能导致流水线效率低下")
     
     # 检查关键设备
     if not config.critical_equipment:
@@ -159,12 +112,7 @@ async def validate_config(config: GlobalConfig):
     # 检查仿真时间
     sim_time = config.sim_time_minutes
     if sim_time < 480:  # 少于8小时
-        warnings.append(f"仿真总时长 {sim_time} 分钟较短，可能无法完成目标产量")
-    
-    # 估算产能
-    estimated_capacity = sim_time / (480 * 1.5)  # 假设每台需要1.5天
-    if config.target_output > estimated_capacity * 1.5:
-        warnings.append(f"目标产量 {config.target_output} 台可能超出生产能力")
+        warnings.append(f"仿真总时长 {sim_time} 分钟较短，可能不足以观察稳定产出")
     
     result = ConfigValidationResult(
         valid=len(errors) == 0,
@@ -189,8 +137,6 @@ async def update_config(config: GlobalConfig):
     # 先验证配置
     errors = []
     
-    if config.num_workers < 1:
-        errors.append("工人数量必须大于0")
     
     if not config.critical_equipment:
         errors.append("必须配置关键设备")

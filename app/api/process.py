@@ -5,6 +5,7 @@
 API端点:
 - GET /api/process/template: 下载CSV模板
 - POST /api/process/parse-csv: 解析上传的CSV
+- POST /api/process/parse-file: 解析上传的CSV或XLSX
 - POST /api/process/validate: 验证工艺流程DAG
 - POST /api/process/save: 保存工艺流程
 - GET /api/process/example: 获取示例工艺流程
@@ -13,34 +14,15 @@ API端点:
 import os
 import io
 import csv
+from urllib.parse import quote
 from typing import List, Dict, Any, Optional, Set
-from enum import Enum
+from app.models.enums import OpType, OP_TYPE_META
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from app.utils.process_file_parser import ProcessFileError, parse_process_file
 
 router = APIRouter()
-
-
-# ============ 枚举定义 ============
-
-class OpType(str, Enum):
-    """操作类型枚举"""
-    H = "H"  # 取/放 (Handling)
-    A = "A"  # 装配 (Assembly)
-    M = "M"  # 测量 (Measurement) - 可触发返工
-    T = "T"  # 工具操作 (Tooling)
-    D = "D"  # 数据记录 (Data Recording)
-
-
-# 操作类型元数据
-OP_TYPE_META = {
-    OpType.H: {"zh": "取/放", "en": "Handling", "color": "#3B82F6", "icon": "📦"},
-    OpType.A: {"zh": "装配", "en": "Assembly", "color": "#10B981", "icon": "🔧"},
-    OpType.M: {"zh": "测量", "en": "Measurement", "color": "#F59E0B", "icon": "📏"},
-    OpType.T: {"zh": "工具操作", "en": "Tooling", "color": "#8B5CF6", "icon": "🛠️"},
-    OpType.D: {"zh": "数据记录", "en": "Data Recording", "color": "#6B7280", "icon": "📝"},
-}
 
 
 # ============ 数据模型 ============
@@ -49,7 +31,7 @@ class ProcessNode(BaseModel):
     """工艺节点模型"""
     step_id: str = Field(description="唯一步骤ID")
     task_name: str = Field(description="任务名称")
-    op_type: OpType = Field(description="操作类型（H/A/M/T/D）")
+    op_type: OpType = Field(description="基础行为类型（H/A/M/T/D/S-Move/S-Rest/Coop）")
     predecessors: str = Field(default="", description="前置依赖（分号分隔）")
     std_duration: float = Field(ge=0, description="标准工时（分钟）")
     time_variance: float = Field(default=0.0, ge=0, description="时间波动方差")
@@ -58,6 +40,8 @@ class ProcessNode(BaseModel):
     required_workers: int = Field(default=1, ge=1, description="所需工人数")
     required_tools: List[str] = Field(default=[], description="所需工具/设备列表")
     station: str = Field(default="ST01", description="工位ID")
+    area_id: str = ""
+    workstation_id: str = ""
     
     # 前端坐标（用于流程图编辑器）
     x: float = Field(default=0, description="节点X坐标")
@@ -83,6 +67,7 @@ class ProcessDefinition(BaseModel):
     name: str = Field(default="未命名流程", description="流程名称")
     description: str = Field(default="", description="流程描述")
     nodes: List[ProcessNode] = Field(default=[], description="工艺节点列表")
+    station_catalog: List[Dict[str, str]] = Field(default_factory=list, description="工位编号、工区与显示名称")
     
     def get_node_map(self) -> Dict[str, ProcessNode]:
         """获取节点映射字典"""
@@ -119,7 +104,9 @@ CSV_TEMPLATE_HEADERS = [
     "rework_prob",
     "required_workers",
     "required_tools",
-    "station"
+    "station",
+    "area_id",
+    "workstation_id"
 ]
 
 CSV_TEMPLATE_EXAMPLE = [
@@ -153,7 +140,7 @@ async def download_template():
     
     # 写入示例数据
     for row in CSV_TEMPLATE_EXAMPLE:
-        writer.writerow(row)
+        writer.writerow(row + ["", ""])
     
     output.seek(0)
     
@@ -168,85 +155,21 @@ async def download_template():
 
 @router.post("/parse-csv", response_model=APIResponse)
 async def parse_csv(file: UploadFile = File(...)):
-    """
-    解析上传的CSV文件
-    
-    将CSV文件解析为工艺流程定义对象
-    """
-    if not file.filename.endswith('.csv'):
-        return APIResponse(
-            success=False,
-            message="请上传CSV格式文件"
-        )
-    
+    """Compatibility entry point; successful data remains a process object."""
+    if not (file.filename or "").casefold().endswith(".csv"):
+        return APIResponse(success=False, message="请上传CSV格式文件")
+    return await parse_file(file)
+
+
+@router.post("/parse-file", response_model=APIResponse)
+async def parse_file(file: UploadFile = File(...)):
+    """Parse and validate the entire process before returning any loadable data."""
     try:
-        # 读取文件内容
-        content = await file.read()
-        
-        # 尝试不同编码
-        for encoding in ['utf-8-sig', 'utf-8', 'gbk', 'gb2312']:
-            try:
-                text = content.decode(encoding)
-                break
-            except UnicodeDecodeError:
-                continue
-        else:
-            return APIResponse(
-                success=False,
-                message="无法识别文件编码，请使用UTF-8编码"
-            )
-        
-        # 解析CSV
-        reader = csv.DictReader(io.StringIO(text))
-        nodes = []
-        errors = []
-        
-        for row_num, row in enumerate(reader, start=2):
-            try:
-                # 解析required_tools
-                tools_str = row.get('required_tools', '').strip()
-                tools = [t.strip() for t in tools_str.split(';') if t.strip()] if tools_str else []
-                
-                node = ProcessNode(
-                    step_id=row.get('step_id', '').strip(),
-                    task_name=row.get('task_name', '').strip(),
-                    op_type=OpType(row.get('op_type', 'A').strip().upper()),
-                    predecessors=row.get('predecessors', '').strip(),
-                    std_duration=float(row.get('std_duration', 0)),
-                    time_variance=float(row.get('time_variance', 0)),
-                    work_load_score=int(row.get('work_load_score', 5)),
-                    rework_prob=float(row.get('rework_prob', 0)),
-                    required_workers=int(row.get('required_workers', 1)),
-                    required_tools=tools,
-                    station=row.get('station', 'ST01').strip() or 'ST01'
-                )
-                nodes.append(node)
-            except Exception as e:
-                errors.append(f"第{row_num}行解析错误: {str(e)}")
-        
-        if errors:
-            return APIResponse(
-                success=False,
-                message=f"CSV解析存在 {len(errors)} 个错误",
-                data={"errors": errors, "parsed_count": len(nodes)}
-            )
-        
-        process = ProcessDefinition(
-            name=file.filename.replace('.csv', ''),
-            nodes=nodes
-        )
-        
-        return APIResponse(
-            success=True,
-            message=f"成功解析 {len(nodes)} 个工艺节点",
-            data=process.model_dump()
-        )
-        
-    except Exception as e:
-        return APIResponse(
-            success=False,
-            message=f"文件解析失败: {str(e)}"
-        )
+        process = parse_process_file(file.filename or "", await file.read())
+        return APIResponse(success=True, message=f"成功解析 {len(process.nodes)} 个工艺节点、{len(process.station_catalog)} 个工位", data=process.model_dump())
+    except ProcessFileError as error:
+        return APIResponse(success=False, message=f"文件导入失败，存在 {len(error.issues)} 个错误",
+                           data={"errors": error.errors, "issues": error.issues, "parsed_count": 0})
 
 
 @router.post("/validate", response_model=APIResponse)
@@ -567,7 +490,10 @@ async def export_process_csv(process: ProcessDefinition):
             node.work_load_score,
             node.rework_prob,
             node.required_workers,
-            ";".join(node.required_tools)
+            ";".join(node.required_tools),
+            node.station,
+            node.area_id,
+            node.workstation_id
         ])
     
     output.seek(0)
@@ -577,6 +503,6 @@ async def export_process_csv(process: ProcessDefinition):
         io.BytesIO(output.getvalue().encode('utf-8-sig')),
         media_type="text/csv",
         headers={
-            "Content-Disposition": f"attachment; filename={filename}"
+            "Content-Disposition": "attachment; filename=process.csv; filename*=UTF-8''" + quote(filename)
         }
     )

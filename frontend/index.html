@@ -4,446 +4,102 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>航空发动机装配排产仿真系统 - 北京航空航天大学</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <link rel="stylesheet" href="css/styles.css">
+    <script src="/static/vendor/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="css/styles.css?v=093f945cf1">
+    <link rel="stylesheet" href="css/workbench.css?v=result-paging-20261021">
+    <link rel="stylesheet" href="css/home.css?v=area-serial-20261021">
+    <link rel="preload" as="image" href="/static/assets/home-engine-poster.jpg">
+    <script type="importmap">{"imports":{"three":"/static/vendor/three/three.module.js"}}</script>
 </head>
-<body>
+<body class="home-active">
     <header class="header">
-        <h1>🛫 航空发动机装配排产仿真系统</h1>
+        <div class="brand"><span class="brand-logo"><img src="/static/assets/beihang-logo.png" alt="北京航空航天大学校徽"></span><div><h1>航空发动机装配排产仿真系统</h1><span>北京航空航天大学 · ASSEMBLY SIMULATION</span></div></div>
         <div class="header-actions">
-            <button class="btn btn-secondary" onclick="importCSV()">📥 导入CSV</button>
-            <button class="btn btn-secondary" onclick="exportCSV()">📤 导出CSV</button>
-            <button class="btn btn-success" onclick="runSimulation()">▶️ 运行仿真</button>
+            <details class="file-menu edit-action"><summary>文件 <span>⌄</span></summary><div class="menu-popover"><button onclick="importCSV()">导入工艺文件（CSV / XLSX）</button><button onclick="exportCSV()">导出流程 CSV</button><button onclick="requestCapacityImport()">载入方案 JSON</button><button onclick="exportCapacityScenario()">导出方案 JSON</button><button onclick="loadComplexExample()">加载 79 工位示例</button><hr><button class="danger-text" onclick="clearCanvas()">清空画布…</button></div></details>
+            <span id="runState" role="status">尚未运行</span>
+            <button class="btn btn-primary edit-action" id="runMain" onclick="runSimulation()">运行仿真</button>
+            <button class="btn btn-outline" id="presentMain" disabled onclick="enterPresentation()">展示排产</button>
+            <button class="btn btn-outline present-action" onclick="document.documentElement.requestFullscreen?.()">全屏</button><button class="btn btn-primary present-action" onclick="exitPresentation()">退出展示</button>
         </div>
     </header>
-    
-    <div class="tabs">
-        <div class="tab active" data-tab="editor">📐 流程编辑</div>
-        <div class="tab" data-tab="config">⚙️ 参数配置</div>
-        <div class="tab" data-tab="results">📊 仿真结果</div>
-        <div class="tab" data-tab="gantt">📅 甘特图</div>
-    </div>
-    
+    <nav class="tabs" aria-label="主导航"><button class="tab active" data-tab="home">首页</button><button class="tab" data-tab="editor">流程编辑</button><button class="tab" data-tab="config">仿真设置</button><button class="tab" data-tab="results">结果分析</button><button class="tab" data-tab="gantt">排产甘特</button><span class="nav-note">编辑流程 → 设置条件 → 运行仿真 → 分析排产</span></nav>
     <div class="main-container">
-        <aside class="sidebar visible" id="sidebar">
+        <aside class="sidebar" id="sidebar">
             <div class="sidebar-section">
-                <div class="sidebar-title">🧰 节点工具箱</div>
-                <div class="toolbox-item" draggable="true" data-type="H">
-                    <div class="toolbox-icon" style="background: #3b82f6;">📦</div>
-                    <div class="toolbox-info">
-                        <h4>取/放 (H)</h4>
-                        <span>Handling</span>
-                    </div>
-                </div>
-                <div class="toolbox-item" draggable="true" data-type="A">
-                    <div class="toolbox-icon" style="background: #10b981;">🔧</div>
-                    <div class="toolbox-info">
-                        <h4>装配 (A)</h4>
-                        <span>Assembly</span>
-                    </div>
-                </div>
-                <div class="toolbox-item" draggable="true" data-type="M">
-                    <div class="toolbox-icon" style="background: #f59e0b;">📏</div>
-                    <div class="toolbox-info">
-                        <h4>测量 (M)</h4>
-                        <span>Measurement</span>
-                    </div>
-                </div>
-                <div class="toolbox-item" draggable="true" data-type="T">
-                    <div class="toolbox-icon" style="background: #8b5cf6;">🛠️</div>
-                    <div class="toolbox-info">
-                        <h4>工具操作 (T)</h4>
-                        <span>Tooling</span>
-                    </div>
-                </div>
-                <div class="toolbox-item" draggable="true" data-type="D">
-                    <div class="toolbox-icon" style="background: #6b7280;">📝</div>
-                    <div class="toolbox-info">
-                        <h4>数据记录 (D)</h4>
-                        <span>Data Recording</span>
-                    </div>
-                </div>
+                <div class="sidebar-title">基础行为单元</div>
+                <p class="behavior-palette-hint">拖拽创建 · 色块修改同类配色</p>
+                <div id="behaviorToolbox"></div>
+                <button type="button" class="behavior-reset" onclick="resetBehaviorColors()">恢复默认配色</button>
             </div>
-            
+
+
+
             <div class="sidebar-section">
-                <div class="sidebar-title">📋 操作说明</div>
-                <div style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.6;">
-                    <p>• 拖拽节点到画布创建</p>
-                    <p>• 双击节点编辑属性</p>
-                    <p>• <b>右键拖拽创建连线</b></p>
-                    <p>• Delete键删除选中</p>
-                    <p>• 滚轮缩放画布</p>
-                </div>
-            </div>
-            
-            <div class="sidebar-section">
-                <div class="sidebar-title">📊 流程统计</div>
+                <div class="sidebar-title"> 流程统计</div>
                 <div id="processStats" style="font-size: 0.875rem;">
                     <p>节点数: <span id="nodeCount">0</span></p>
                     <p>连线数: <span id="edgeCount">0</span></p>
                 </div>
             </div>
         </aside>
-        
+
         <main class="content">
+            <div id="tab-home" class="tab-content home-page active">
+                <div class="home-heading">
+                    <div class="home-heading-actions">
+                        <button class="btn btn-secondary" id="homeDetailsToggle" onclick="toggleHomeDetails()" aria-expanded="false" aria-controls="homeResultDetails">结果详情</button>
+                    </div>
+                </div>
+                <div class="home-layout">
+                    <section class="home-function-panel" aria-label="功能导航">
+                        <div id="homeFunctions"></div>
+                        <div class="home-files-panel" id="homeFilesPanel" hidden><h4>方案导入与导出</h4><p>沿用当前流程与配置</p><button onclick="homeFileAction('importCSV')">导入工艺文件 <span>↗</span></button><button onclick="homeFileAction('requestCapacityImport')">载入方案 JSON <span>↗</span></button><hr><button id="homeExportCSV" onclick="homeFileAction('exportCSV')">导出流程 CSV <span>↓</span></button><button id="homeExportJSON" onclick="homeFileAction('exportCapacityScenario')">导出方案 JSON <span>↓</span></button></div>
+                    </section>
+                    <section class="home-scene" id="homeScene" aria-label="发动机三维展示">
+                        <div class="home-engine-host" id="homeEngineHost">
+                            <img id="homeEnginePoster" src="/static/assets/home-engine-poster.jpg" alt="Unity 发动机模型预览" draggable="false">
+                            <div class="home-engine-loading" id="homeEngineLoading" role="status"><span id="homeEngineLoadText">正在加载发动机</span><progress id="homeEngineProgress" max="1" aria-label="发动机模型加载进度"></progress><button id="homeEngineRetry" hidden>重试</button></div>
+                        </div>
+                        <div class="home-engine-toolbar" aria-label="模型操作"><button id="homeMotion" aria-pressed="true" onclick="toggleHomeMotion()"><span class="home-rotate-dot"></span>自动旋转</button><button onclick="window.HomeEngineViewer?.reset()">复位</button><button id="homeFullscreen" onclick="toggleHomeFullscreen()" aria-pressed="false"><span>全屏</span></button></div>
+                    </section>
+                    <section class="home-kpi-panel" aria-label="运行概览"><header><h3>运行概览</h3></header><div id="homeMetrics"></div></section>
+                </div>
+                <div class="home-status-line"><span id="homeRunStatus">就绪</span></div>
+                <aside class="home-result-details" id="homeResultDetails" hidden aria-label="结果详情"><button class="home-prompt-close" onclick="toggleHomeDetails(false)" aria-label="关闭结果详情">×</button><h3>结果详情</h3><p id="homeMetricsNote" hidden></p><dl><dt>评估场景</dt><dd id="homeScenario">22 工作日 × 8 小时</dd><dt>流程规模</dt><dd id="homeModelSummary">11 个工区 / 79 道工序</dd><dt>运行时间</dt><dd id="homeResultTime">—</dd></dl></aside>
+                <aside class="home-result-prompt" id="homeResultPrompt" hidden tabindex="-1" aria-label="开始使用"><button class="home-prompt-close" onclick="document.getElementById('homeResultPrompt').hidden=true" aria-label="关闭提示">×</button><div class="home-eyebrow">GET STARTED</div><h3>从一份流程开始</h3><p id="homePromptText">载入流程或已有方案，即可开始。</p><div><button class="btn btn-primary" id="homePromptExample" onclick="loadHomeExample()">载入示例流程</button><button class="btn btn-secondary" onclick="homeFileAction('requestCapacityImport')">载入已有方案</button><button class="btn btn-secondary" onclick="homeFileAction('importCSV')">导入工艺文件</button></div></aside>
+            </div>
             <!-- Tab: Editor -->
-            <div id="tab-editor" class="tab-content active">
+            <div id="tab-editor" class="tab-content">
+                <div id="processImportNotice" class="process-import-notice" role="status" hidden></div>
+                <div class="editor-workspace">
                 <div class="canvas-container">
                     <div class="canvas-toolbar">
-                        <button class="btn btn-secondary" onclick="autoLayout()">🔄 自动布局</button>
-                        <button class="btn btn-secondary" onclick="autoLayoutByStation()">📍 按工位布局</button>
-                        <select id="stationFilter" onchange="filterByStation()" style="padding: 0.5rem; border-radius: 6px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color);">
-                            <option value="">全部工位</option>
-                        </select>
-                        <label style="display: flex; align-items: center; gap: 0.3rem; font-size: 0.875rem; color: var(--text-secondary);">
-                            <input type="checkbox" id="showContainers" checked onchange="toggleContainers()"> 显示工位容器
-                        </label>
-                        <button class="btn btn-secondary" id="layoutModeToggle" onclick="toggleLayoutMode()">🏢 工位层级视图</button>
-                        <button class="btn btn-secondary" onclick="clearCanvas()">🗑️ 清空</button>
-                        <button class="btn btn-primary" onclick="loadComplexExample()">📋 加载复杂示例</button>
+                        <button class="btn btn-secondary" onclick="toggleToolbox()" title="收起或展开基础行为单元">基础行为单元</button>
+                        <button class="btn btn-secondary active" id="selectTool" onclick="setCanvasTool(false)">选择</button><button class="btn btn-secondary" id="connectTool" onclick="setCanvasTool(true)">连线</button>
+                        <select id="stationFilter" aria-label="工区筛选" onchange="filterByStation()"><option value="">全部工区</option></select>
+                        <div class="canvas-zoom-controls" role="group" aria-label="流程图缩放">
+                            <button class="btn btn-secondary" id="canvasZoomOut" onclick="zoomCanvas(1 / 1.2)" aria-label="缩小流程图" title="缩小流程图">−</button>
+                            <output id="canvasZoomLabel" aria-label="当前流程图缩放比例">100%</output>
+                            <button class="btn btn-secondary" id="canvasZoomIn" onclick="zoomCanvas(1.2)" aria-label="放大流程图" title="放大流程图">+</button>
+                            <button class="btn btn-secondary" onclick="resetCanvasZoom()" title="恢复原始大小">100%</button>
+                        </div>
+                        <button class="btn btn-secondary" onclick="fitCanvas()">适应画布</button><button class="btn btn-secondary" onclick="openSelectedArea()">工区属性</button>
+                        <details class="view-menu"><summary>视图 ⌄</summary><div class="menu-popover"><button onclick="autoLayout()">自动布局</button><button onclick="autoLayoutByStation()">按工区布局</button><button id="layoutModeToggle" onclick="toggleLayoutMode()">工区层级视图</button><label><input type="checkbox" id="showContainers" checked onchange="toggleContainers()"> 显示工区容器</label></div></details>
+                        <details class="view-menu"><summary>帮助</summary><div class="menu-popover help-menu">拖拽工具创建工序；单击选中并编辑；拖动移动。Shift＋左键拖拽或连线工具建立依赖。右键查看工区。滚轮围绕鼠标缩放，空白处拖动平移；点击 100% 阅读原始大小的工序文字。</div></details>
                     </div>
-                    <canvas id="processCanvas"></canvas>
+                    <canvas id="processCanvas" aria-label="工艺流程画布：右键工区查看属性"></canvas>
+                    <div id="areaCanvasNotice" class="area-canvas-notice" role="status">右键工区查看与修改属性</div>
                 </div>
-            </div>
-            
-            <!-- Tab: Config -->
-            <div id="tab-config" class="tab-content">
-                <div class="card">
-                    <h3 class="card-title">⏰ 排班配置</h3>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>每日工作小时数</label>
-                            <input type="number" id="workHoursPerDay" value="8" min="1" max="24">
-                        </div>
-                        <div class="form-group">
-                            <label>每月工作天数</label>
-                            <input type="number" id="workDaysPerMonth" value="22" min="1" max="31">
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>工人数量</label>
-                            <input type="number" id="numWorkers" value="8" min="1">
-                        </div>
-                        <div class="form-group">
-                            <label>目标月产量（台）</label>
-                            <input type="number" id="targetOutput" value="3" min="1">
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="card">
-                    <h3 class="card-title">🔧 关键设备配置</h3>
-                    <div id="equipmentList" class="equipment-list"></div>
-                    <div class="form-row" style="margin-top: 1rem;">
-                        <div class="form-group" style="flex: 1;">
-                            <label>设备名称</label>
-                            <input type="text" id="newEquipmentName" placeholder="输入设备名称" style="width: 100%;">
-                        </div>
-                        <div class="form-group" style="width: 120px;">
-                            <label>数量</label>
-                            <input type="number" id="newEquipmentCount" value="1" min="1" style="width: 100%;">
-                        </div>
-                    </div>
-                    <button class="btn btn-secondary" style="margin-top: 1rem;" onclick="addEquipment()">➕ 添加设备</button>
-                </div>
-                
-                <div class="card">
-                    <h3 class="card-title">⚙️ 高级配置</h3>
-                    <div class="form-row">
-                        <div class="form-group" style="flex-direction: row; align-items: center; gap: 0.5rem;">
-                            <input type="checkbox" id="pipelineMode" checked style="width: auto;">
-                            <label for="pipelineMode" style="margin-bottom: 0;">启用流水线模式 (多台并行)</label>
-                        </div>
-                        <div class="form-group" style="flex-direction: row; align-items: center; gap: 0.5rem;">
-                            <input type="checkbox" id="stationConstraintMode" style="width: auto;">
-                            <label for="stationConstraintMode" style="margin-bottom: 0;">启用工位资源限制 (工位内强制串行)</label>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="card">
-                    <h3 class="card-title">😴 休息规则配置</h3>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>连续工作触发阈值（分钟）</label>
-                            <input type="number" id="restTimeThreshold" value="50" min="1">
-                        </div>
-                        <div class="form-group">
-                            <label>时间触发休息时长（分钟）</label>
-                            <input type="number" id="restDurationTime" value="5" min="1">
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>负荷触发阈值（REBA 1-10）</label>
-                            <input type="number" id="restLoadThreshold" value="7" min="1" max="10">
-                        </div>
-                        <div class="form-group">
-                            <label>负荷触发休息时长（分钟）</label>
-                            <input type="number" id="restDurationLoad" value="3" min="1">
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Tab: Results -->
-            <div id="tab-results" class="tab-content">
-                <div class="kpi-grid">
-                    <div class="kpi-card">
-                        <div class="kpi-label">月产量</div>
-                        <div class="kpi-value"><span id="kpiEngines">-</span><span class="kpi-unit">台</span></div>
-                    </div>
-                    <div class="kpi-card green">
-                        <div class="kpi-label">计划达成率</div>
-                        <div class="kpi-value"><span id="kpiAchievement">-</span><span class="kpi-unit">%</span></div>
-                    </div>
-                    <div class="kpi-card orange">
-                        <div class="kpi-label">平均周期时间</div>
-                        <div class="kpi-value"><span id="kpiCycleTime">-</span><span class="kpi-unit">小时</span></div>
-                    </div>
-                    <div class="kpi-card purple">
-                        <div class="kpi-label">一次通过率</div>
-                        <div class="kpi-value"><span id="kpiPassRate">-</span><span class="kpi-unit">%</span></div>
-                    </div>
-                    <div class="kpi-card red">
-                        <div class="kpi-label">总休息时间</div>
-                        <div class="kpi-value"><span id="kpiRestTime">-</span><span class="kpi-unit">分钟</span></div>
-                    </div>
-                    <div class="kpi-card cyan">
-                        <div class="kpi-label">高强度任务暴露</div>
-                        <div class="kpi-value"><span id="kpiHighIntensity">-</span><span class="kpi-unit">次</span></div>
-                    </div>
-                </div>
-                
-                <div class="card">
-                    <h3 class="card-title">🔄 人因影响对比（考虑休息 vs 不考虑休息）</h3>
-                    <table class="comparison-table">
-                        <thead>
-                            <tr>
-                                <th>指标</th>
-                                <th>考虑人因（有休息）</th>
-                                <th>不考虑人因（无休息）</th>
-                                <th>差异</th>
-                            </tr>
-                        </thead>
-                        <tbody id="comparisonBody">
-                            <tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">运行仿真后显示对比数据</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-                
-                <div class="charts-grid">
-                    <div class="chart-container">
-                        <div class="chart-title">👷 工人利用率（分钟）</div>
-                        <canvas id="workerChart"></canvas>
-                    </div>
-                    <div class="chart-container">
-                        <div class="chart-title">🏭 设备利用率（分钟）</div>
-                        <canvas id="equipmentChart"></canvas>
-                    </div>
-                </div>
-                
-                <div class="card" style="margin-top: 1rem;">
-                    <div class="chart-header">
-                        <h3 class="card-title" style="margin-bottom: 0;">😓 工人疲劳度曲线</h3>
-                        <select id="fatigueWorkerSelect" onchange="updateFatigueChart()">
-                            <option value="all">全部工人</option>
-                        </select>
-                    </div>
-                    <canvas id="fatigueChart" style="max-height: 300px;"></canvas>
-                </div>
-                
-                <div class="card" style="margin-top: 1rem;">
-                    <h3 class="card-title">📈 质量统计</h3>
-                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; text-align: center;">
-                        <div>
-                            <div style="font-size: 0.75rem; color: var(--text-secondary);">总检验次数</div>
-                            <div style="font-size: 1.5rem; font-weight: 600;" id="statInspections">-</div>
-                        </div>
-                        <div>
-                            <div style="font-size: 0.75rem; color: var(--text-secondary);">总返工次数</div>
-                            <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent-red);" id="statReworks">-</div>
-                        </div>
-                        <div>
-                            <div style="font-size: 0.75rem; color: var(--text-secondary);">返工时间</div>
-                            <div style="font-size: 1.5rem; font-weight: 600;" id="statReworkTime">-</div>
-                        </div>
-                        <div>
-                            <div style="font-size: 0.75rem; color: var(--text-secondary);">仿真时长</div>
-                            <div style="font-size: 1.5rem; font-weight: 600;" id="statDuration">-</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- 瓶颈分析模块 -->
-                <div class="card" style="margin-top: 1rem;">
-                    <h3 class="card-title">🚧 生产瓶颈分析</h3>
-                    <div id="bottleneckLoading" style="text-align: center; color: var(--text-secondary); padding: 1rem;">
-                        运行仿真后显示瓶颈分析
-                    </div>
-                    <div id="bottleneckContent" style="display: none;">
-                        <!-- 瓶颈汇总 -->
-                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1rem;">
-                            <div style="text-align: center; padding: 0.75rem; background: var(--bg-secondary); border-radius: 8px;">
-                                <div style="font-size: 0.75rem; color: var(--text-secondary);">总瓶颈数</div>
-                                <div style="font-size: 1.5rem; font-weight: 600;" id="bottleneckTotal">0</div>
-                            </div>
-                            <div style="text-align: center; padding: 0.75rem; background: rgba(239,68,68,0.1); border-radius: 8px; border: 1px solid var(--accent-red);">
-                                <div style="font-size: 0.75rem; color: var(--accent-red);">高严重性</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent-red);" id="bottleneckHigh">0</div>
-                            </div>
-                            <div style="text-align: center; padding: 0.75rem; background: rgba(245,158,11,0.1); border-radius: 8px; border: 1px solid var(--accent-orange);">
-                                <div style="font-size: 0.75rem; color: var(--accent-orange);">中严重性</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent-orange);" id="bottleneckMedium">0</div>
-                            </div>
-                            <div style="text-align: center; padding: 0.75rem; background: rgba(16,185,129,0.1); border-radius: 8px; border: 1px solid var(--accent-green);">
-                                <div style="font-size: 0.75rem; color: var(--accent-green);">效率评分</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent-green);" id="efficiencyScore">-</div>
-                            </div>
-                        </div>
-                        
-                        <!-- 瓶颈详情列表 -->
-                        <div id="bottleneckList" style="max-height: 300px; overflow-y: auto;"></div>
-                        
-                        <!-- 改进建议 -->
-                        <div style="margin-top: 1rem; padding: 1rem; background: var(--bg-secondary); border-radius: 8px;">
-                            <div style="font-weight: 600; margin-bottom: 0.5rem; color: var(--accent-cyan);">💡 改进建议</div>
-                            <div id="bottleneckRecommendations" style="font-size: 0.875rem; color: var(--text-secondary);"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- 设备分类显示 -->
-                <div class="card" style="margin-top: 1rem;">
-                    <h3 class="card-title">🏭 设备使用详情</h3>
-                    <div id="equipmentDetailLoading" style="text-align: center; color: var(--text-secondary); padding: 1rem;">
-                        运行仿真后显示设备详情
-                    </div>
-                    <div id="equipmentDetailContent" style="display: none;">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                            <!-- 关键设备 -->
-                            <div>
-                                <div style="font-weight: 600; margin-bottom: 0.5rem; color: var(--accent-orange);">⚠️ 关键设备（有数量限制）</div>
-                                <div id="criticalEquipmentList" style="max-height: 200px; overflow-y: auto;"></div>
-                            </div>
-                            <!-- 无限制设备 -->
-                            <div>
-                                <div style="font-weight: 600; margin-bottom: 0.5rem; color: var(--accent-green);">✅ 无限制设备（默认充足）</div>
-                                <div id="unlimitedEquipmentList" style="max-height: 200px; overflow-y: auto;"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- 工位统计分析模块 -->
-                <div class="card" style="margin-top: 1rem;">
-                    <h3 class="card-title">📍 工位统计分析</h3>
-                    <div id="stationAnalysisLoading" style="text-align: center; color: var(--text-secondary); padding: 1rem;">
-                        运行仿真后显示工位分析
-                    </div>
-                    <div id="stationAnalysisContent" style="display: none;">
-                        <!-- 工位汇总统计 -->
-                        <div style="margin-bottom: 1rem;">
-                            <div style="font-weight: 600; margin-bottom: 0.5rem; color: var(--accent-purple);">📊 工位汇总</div>
-                            <div id="stationSummaryList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.75rem;"></div>
-                        </div>
-                        
-                        <!-- 工位瓶颈排名 -->
-                        <div style="margin-bottom: 1rem;">
-                            <div style="font-weight: 600; margin-bottom: 0.5rem; color: var(--accent-orange);">🔥 工位瓶颈TOP</div>
-                            <div id="stationBottleneckList" style="max-height: 200px; overflow-y: auto;"></div>
-                        </div>
-                        
-                        <!-- 工位流转矩阵 -->
-                        <div style="margin-bottom: 1rem;">
-                            <div style="font-weight: 600; margin-bottom: 0.5rem; color: var(--accent-cyan);">🔄 工位流转分析</div>
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                                <div>
-                                    <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem;">流转TOP路径</div>
-                                    <div id="stationFlowTopPaths" style="max-height: 150px; overflow-y: auto;"></div>
-                                </div>
-                                <div>
-                                    <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem;">流转矩阵</div>
-                                    <div id="stationFlowMatrix" style="max-height: 200px; overflow: auto;"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Tab: Gantt -->
-            <div id="tab-gantt" class="tab-content">
-                <div class="gantt-controls">
-                    <span>时间范围:</span>
-                    <select id="ganttStartDay"></select>
-                    <select id="ganttStartHour"></select>
-                    <span>至</span>
-                    <select id="ganttEndDay"></select>
-                    <select id="ganttEndHour"></select>
-                    <button class="btn btn-primary" onclick="updateGantt()">🔄 刷新</button>
-                    <button class="btn btn-secondary" onclick="exportGanttCSV()">📤 导出CSV</button>
-                </div>
-                
-                <div class="gantt-section">
-                    <div class="gantt-section-title">🏭 生产进度甘特图（按发动机）</div>
-                    <div class="gantt-container" id="engineGanttContainer">
-                        <div class="gantt-wrapper">
-                            <div class="gantt-left">
-                                <div class="gantt-left-header">发动机</div>
-                                <div class="gantt-left-body" id="engineGanttLabels"></div>
-                            </div>
-                            <div class="gantt-right" id="engineGanttRight">
-                                <div class="gantt-right-inner">
-                                    <div class="gantt-header">
-                                        <div class="gantt-timeline" id="ganttTimeline"></div>
-                                    </div>
-                                    <div class="gantt-body" id="ganttBody"></div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="gantt-legend">
-                            <div class="legend-item"><div class="legend-color normal"></div><span>正常工作</span></div>
-                            <div class="legend-item"><div class="legend-color rest"></div><span>休息</span></div>
-                            <div class="legend-item"><div class="legend-color rework"></div><span>返工</span></div>
-                            <div class="legend-item"><div class="legend-color waiting"></div><span>等待资源</span></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="gantt-section">
-                    <div class="gantt-section-title">👷 工人排产甘特图（按工人）</div>
-                    <div class="gantt-container" id="workerGanttContainer">
-                        <div class="gantt-wrapper">
-                            <div class="gantt-left">
-                                <div class="gantt-left-header">工人</div>
-                                <div class="gantt-left-body" id="workerGanttLabels"></div>
-                            </div>
-                            <div class="gantt-right" id="workerGanttRight">
-                                <div class="gantt-right-inner">
-                                    <div class="gantt-header">
-                                        <div class="gantt-timeline" id="workerGanttTimeline"></div>
-                                    </div>
-                                    <div class="gantt-body" id="workerGanttBody"></div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="gantt-legend">
-                            <div class="legend-item"><div class="legend-color normal"></div><span>工作中</span></div>
-                            <div class="legend-item"><div class="legend-color rest"></div><span>休息中</span></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </main>
-    </div>
-    
-    <!-- Node Edit Modal -->
-    <div class="modal-overlay" id="nodeModal">
-        <div class="modal">
+                <aside id="areaInspector" class="area-inspector" aria-label="工区属性" hidden>
+                    <header class="area-inspector-header"><div><h3 id="areaPanelTitle">工区属性</h3><span id="areaPanelState"></span></div><button type="button" id="areaClose" class="area-icon-button" aria-label="关闭工区属性">×</button></header>
+                    <div id="areaPanelBody" class="area-inspector-body"></div>
+                    <div id="areaPanelError" class="area-panel-error" role="alert"></div>
+                    <footer class="area-inspector-footer"><button type="button" id="areaCancel" class="btn btn-secondary">取消修改</button><button type="button" id="areaSave" class="btn btn-secondary">保存</button><button type="button" id="areaSaveRun" class="btn btn-success">查看改善效果</button></footer>
+                </aside>
+    <div class="node-inspector" id="nodeModal">
+        <div class="node-inspector-inner">
             <div class="modal-header">
-                <h3>📝 编辑节点属性</h3>
+                <h3> 编辑节点属性</h3>
                 <button class="modal-close" onclick="closeNodeModal()">&times;</button>
             </div>
             <div class="modal-body">
@@ -502,45 +158,366 @@
                     <input type="text" id="nodePredecessors" placeholder="如: S001;S002">
                 </div>
                 <div class="form-group">
-                    <label>工位 *</label>
+                    <label>所属工区 *</label>
                     <select id="nodeStation" required>
-                        <option value="">-- 请选择工位 --</option>
+                        <option value="">-- 请选择工区 --</option>
                     </select>
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeNodeModal()">取消</button>
+                <button class="btn btn-secondary" onclick="closeNodeModal(true)">取消</button>
                 <button class="btn btn-danger" onclick="deleteNode()">删除节点</button>
                 <button class="btn btn-primary" onclick="saveNode()">保存</button>
             </div>
         </div>
     </div>
-    
-    <div class="loading" id="loading">
-        <div class="spinner"></div>
-        <div>正在运行仿真...</div>
+
+
+                </div>
+            </div>
+
+            <!-- Tab: Config -->
+            <div id="tab-config" class="tab-content">
+                <details class="card" id="areaAdvancedSettings">
+                    <summary>工区仿真高级设置与方案文件</summary>
+                    <p id="capacityModelState">在流程图右键工区，保存资源配置后启用工区约束。</p>
+                    <div class="form-row" style="margin-top:16px">
+                        <div class="form-group"><label for="capacityMode">运行方式</label><select id="capacityMode"><option value="plan">计划仿真</option><option value="capacity">能力评估（持续补投）</option></select></div>
+                        <div class="form-group"><label for="capacityWip">能力评估在制上限（空白为自动）</label><input id="capacityWip" type="number" min="2" max="10000" placeholder="自动：工位并行名额总和，至少2"></div>
+                        <div class="form-group"><label for="capacitySeed">随机种子</label><input id="capacitySeed" type="number" min="0" value="42"></div>
+                    </div>
+                    <p>能力评估持续补投；计划仿真沿用现有投产规则。资源调整效果由仿真确认。</p>
+                    <div class="capacity-actions"><button class="btn btn-secondary" onclick="exportCapacityScenario()">导出方案JSON</button><button class="btn btn-secondary" onclick="requestCapacityImport()">载入方案JSON</button></div>
+                    <input id="capacityScenarioFile" type="file" accept=".json" hidden>
+                    <div id="capacityStatus" role="status"></div>
+                </details>
+                <div class="card">
+                    <h3 class="card-title"> 排班配置</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>每日工作小时数</label>
+                            <input type="number" id="workHoursPerDay" value="8" min="1" max="24">
+                        </div>
+                        <div class="form-group">
+                            <label>每月工作天数</label>
+                            <input type="number" id="workDaysPerMonth" value="22" min="1" max="31">
+                        </div>
+                    </div>
+                    <p class="muted">人员按需到岗；保留疲劳与休息规则。按评估时长统计实际产出。</p>
+                </div>
+
+                <div class="card">
+                    <h3 class="card-title"> 关键设备配置</h3>
+                    <div id="equipmentList" class="equipment-list"></div>
+                    <div class="form-row" style="margin-top: 1rem;">
+                        <div class="form-group" style="flex: 1;">
+                            <label>设备名称</label>
+                            <input type="text" id="newEquipmentName" placeholder="输入设备名称" style="width: 100%;">
+                        </div>
+                        <div class="form-group" style="width: 120px;">
+                            <label>数量</label>
+                            <input type="number" id="newEquipmentCount" value="1" min="1" style="width: 100%;">
+                        </div>
+                    </div>
+                    <button class="btn btn-secondary" style="margin-top: 1rem;" onclick="addEquipment()"> 添加设备</button>
+                </div>
+
+                <div class="card">
+                    <h3 class="card-title"> 高级配置</h3>
+                    <div class="form-row">
+                        <div class="form-group" style="flex-direction: row; align-items: center; gap: 0.5rem;">
+                            <input type="checkbox" id="pipelineMode" checked style="width: auto;">
+                            <label for="pipelineMode" style="margin-bottom: 0;">启用流水线模式 (多台并行)</label>
+                        </div>
+                        <div class="form-group" style="flex-direction: row; align-items: center; gap: 0.5rem;">
+                            <input type="checkbox" id="stationConstraintMode" checked disabled style="width: auto;">
+                            <label for="stationConstraintMode" style="margin-bottom: 0;">同一工区工序强制串行（始终生效）</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3 class="card-title"> 休息规则配置</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>连续工作触发阈值（分钟）</label>
+                            <input type="number" id="restTimeThreshold" value="50" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>时间触发休息时长（分钟）</label>
+                            <input type="number" id="restDurationTime" value="5" min="1">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>负荷触发阈值（REBA 1-10）</label>
+                            <input type="number" id="restLoadThreshold" value="7" min="1" max="10">
+                        </div>
+                        <div class="form-group">
+                            <label>负荷触发休息时长（分钟）</label>
+                            <input type="number" id="restDurationLoad" value="3" min="1">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: Results -->
+            <div id="tab-results" class="tab-content">
+                <div id="unitySyncNotice" role="status" hidden style="margin-bottom: 16px; padding: 12px 16px; border: 1px solid #f59e0b; border-radius: 8px; color: #fbbf24;"></div>
+                <section class="card" id="stationProgressPanel" data-result-group="overview">
+                    <h3 class="card-title">工位进度</h3>
+                    <div class="station-progress-controls">
+                        <label>发动机<select id="stationProgressEngine" disabled><option value="">全部发动机</option></select></label>
+                        <label>仿真时间（分钟）<input id="stationProgressTime" type="number" min="0" step="any" placeholder="期末" disabled></label>
+                        <button class="btn btn-secondary" id="stationProgressQuery" disabled>查询进度</button>
+                    </div>
+                    <p class="muted" id="stationProgressStatus" role="status">运行仿真后查看各工位已放行进度。</p>
+                    <div class="resource-table station-progress-table"><table><thead><tr><th>工位编号与名称</th><th>发动机</th><th>标准工时进度</th><th>已放行工序</th><th>状态</th></tr></thead><tbody id="stationProgressRows"><tr><td colspan="5">暂无工位进度</td></tr></tbody></table></div>
+                    <div class="result-pager" id="stationProgressPager" hidden><button class="btn btn-secondary" id="stationProgressPrevious" onclick="changeStationProgressPage(-1)">上一页</button><span id="stationProgressPageLabel"></span><button class="btn btn-secondary" id="stationProgressNext" onclick="changeStationProgressPage(1)">下一页</button></div>
+                </section>
+                <div class="kpi-grid">
+                    <div class="kpi-card">
+                        <div class="kpi-label">评估期产出</div>
+                        <div class="kpi-value"><span id="kpiEngines">-</span><span class="kpi-unit">台</span></div>
+                    </div>
+                    <div class="kpi-card green">
+                        <div class="kpi-label">累计人分钟</div>
+                        <div class="kpi-value"><span id="kpiLaborMinutes">-</span><span class="kpi-unit">人分钟</span></div>
+                    </div>
+                    <div class="kpi-card"><div class="kpi-label">峰值同时作业人数</div><div class="kpi-value"><span id="kpiPeakWorkers">-</span><span class="kpi-unit">人</span></div></div>
+                    <div class="kpi-card orange">
+                        <div class="kpi-label">平均周期时间</div>
+                        <div class="kpi-value"><span id="kpiCycleTime">-</span><span class="kpi-unit">小时</span></div>
+                    </div>
+                    <div class="kpi-card purple">
+                        <div class="kpi-label">一次通过率</div>
+                        <div class="kpi-value"><span id="kpiPassRate">-</span><span class="kpi-unit">%</span></div>
+                    </div>
+                    <div class="kpi-card red">
+                        <div class="kpi-label">总休息时间</div>
+                        <div class="kpi-value"><span id="kpiRestTime">-</span><span class="kpi-unit">分钟</span></div>
+                    </div>
+                    <div class="kpi-card cyan">
+                        <div class="kpi-label">高强度任务暴露</div>
+                        <div class="kpi-value"><span id="kpiHighIntensity">-</span><span class="kpi-unit">次</span></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3 class="card-title"> 人因影响对比（考虑休息 vs 不考虑休息）</h3>
+                    <table class="comparison-table">
+                        <thead>
+                            <tr>
+                                <th>指标</th>
+                                <th>考虑人因（有休息）</th>
+                                <th>不考虑人因（无休息）</th>
+                                <th>差异</th>
+                            </tr>
+                        </thead>
+                        <tbody id="comparisonBody">
+                            <tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">运行仿真后显示对比数据</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="charts-grid">
+                    <div class="chart-container">
+                        <div class="chart-title"> 按需人员作业与休息（分钟）</div>
+                        <canvas id="workerChart"></canvas>
+                        <div class="result-pager" id="workerChartPager" hidden><button class="btn btn-secondary" id="workerChartPrevious" onclick="changeWorkerChartPage(-1)">上一页</button><span id="workerChartPageLabel"></span><button class="btn btn-secondary" id="workerChartNext" onclick="changeWorkerChartPage(1)">下一页</button></div>
+                    </div>
+                    <div class="chart-container">
+                        <div class="chart-title"> 设备利用率（分钟）</div>
+                        <canvas id="equipmentChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: 1rem;">
+                    <div class="chart-header">
+                        <h3 class="card-title" style="margin-bottom: 0;"> 工人疲劳度曲线</h3>
+                        <select id="fatigueWorkerSelect" onchange="changeFatigueWorker()">
+                            <option value="all">全部工人</option>
+                        </select>
+                    </div>
+                    <canvas id="fatigueChart" style="max-height: 300px;"></canvas>
+                    <div class="result-pager" id="fatigueChartPager" hidden><button class="btn btn-secondary" id="fatigueChartPrevious" onclick="changeFatiguePage(-1)">上一页</button><span id="fatigueChartPageLabel"></span><button class="btn btn-secondary" id="fatigueChartNext" onclick="changeFatiguePage(1)">下一页</button></div>
+                </div>
+
+                <div class="card" style="margin-top: 1rem;">
+                    <h3 class="card-title"> 质量统计</h3>
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; text-align: center;">
+                        <div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary);">总检验次数</div>
+                            <div style="font-size: 1.5rem; font-weight: 600;" id="statInspections">-</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary);">总返工次数</div>
+                            <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent-red);" id="statReworks">-</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary);">返工时间</div>
+                            <div style="font-size: 1.5rem; font-weight: 600;" id="statReworkTime">-</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary);">仿真时长</div>
+                            <div style="font-size: 1.5rem; font-weight: 600;" id="statDuration">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 瓶颈分析模块 -->
+                <div class="card" style="margin-top: 1rem;">
+                    <h3 class="card-title"> 资源等待分析</h3>
+                    <div id="bottleneckLoading" style="text-align: center; color: var(--text-secondary); padding: 1rem;">
+                        运行仿真后显示瓶颈分析
+                    </div>
+                    <div id="bottleneckContent" style="display: none;">
+                        <!-- 瓶颈汇总 -->
+                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1rem;">
+                            <div style="text-align: center; padding: 0.75rem; background: var(--bg-secondary); border-radius: 8px;">
+                                <div style="font-size: 0.75rem; color: var(--text-secondary);">等待项</div>
+                                <div style="font-size: 1.5rem; font-weight: 600;" id="bottleneckTotal">0</div>
+                            </div>
+                            <div style="text-align: center; padding: 0.75rem; background: rgba(239,68,68,0.1); border-radius: 8px; border: 1px solid var(--accent-red);">
+                                <div style="font-size: 0.75rem; color: var(--accent-red);">长等待项</div>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent-red);" id="bottleneckHigh">0</div>
+                            </div>
+                            <div style="text-align: center; padding: 0.75rem; background: rgba(245,158,11,0.1); border-radius: 8px; border: 1px solid var(--accent-orange);">
+                                <div style="font-size: 0.75rem; color: var(--accent-orange);">一般等待项</div>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent-orange);" id="bottleneckMedium">0</div>
+                            </div>
+                            <div style="text-align: center; padding: 0.75rem; background: rgba(16,185,129,0.1); border-radius: 8px; border: 1px solid var(--accent-green);">
+                                <div style="font-size: 0.75rem; color: var(--accent-green);">效率评分</div>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent-green);" id="efficiencyScore">-</div>
+                            </div>
+                        </div>
+
+                        <!-- 瓶颈详情列表 -->
+                        <div id="bottleneckList" style="max-height: 300px; overflow-y: auto;"></div>
+
+                        <!-- 改进建议 -->
+                        <div style="margin-top: 1rem; padding: 1rem; background: var(--bg-secondary); border-radius: 8px;">
+                            <div style="font-weight: 600; margin-bottom: 0.5rem; color: var(--accent-cyan);"> 改进建议</div>
+                            <div id="bottleneckRecommendations" style="font-size: 0.875rem; color: var(--text-secondary);"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 设备分类显示 -->
+                <div class="card" style="margin-top: 1rem;">
+                    <h3 class="card-title"> 设备使用详情</h3>
+                    <div id="equipmentDetailLoading" style="text-align: center; color: var(--text-secondary); padding: 1rem;">
+                        运行仿真后显示设备详情
+                    </div>
+                    <div id="equipmentDetailContent" style="display: none;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <!-- 关键设备 -->
+                            <div>
+                                <div style="font-weight: 600; margin-bottom: 0.5rem; color: var(--accent-orange);"> 关键设备（有数量限制）</div>
+                                <div id="criticalEquipmentList" style="max-height: 200px; overflow-y: auto;"></div>
+                            </div>
+                            <!-- 无限制设备 -->
+                            <div>
+                                <div style="font-weight: 600; margin-bottom: 0.5rem; color: var(--accent-green);"> 无限制设备（默认充足）</div>
+                                <div id="unlimitedEquipmentList" style="max-height: 200px; overflow-y: auto;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 工区统计分析模块 -->
+                <div class="card" style="margin-top: 1rem;">
+                    <h3 class="card-title"> 工区统计分析</h3>
+                    <div id="stationAnalysisLoading" style="text-align: center; color: var(--text-secondary); padding: 1rem;">
+                        运行仿真后显示工位分析
+                    </div>
+                    <div id="stationAnalysisContent" style="display: none;">
+                        <!-- 工区汇总统计 -->
+                        <div style="margin-bottom: 1rem;">
+                            <div style="font-weight: 600; margin-bottom: 0.5rem; color: var(--accent-purple);"> 工区汇总</div>
+                            <div id="stationSummaryList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.75rem;"></div>
+                        </div>
+
+                        <!-- 工位瓶颈排名 -->
+                        <div style="margin-bottom: 1rem;">
+                            <div style="font-weight: 600; margin-bottom: 0.5rem; color: var(--accent-orange);"> 工区等待记录</div>
+                            <div id="stationBottleneckList" style="max-height: 200px; overflow-y: auto;"></div>
+                        </div>
+
+                        <!-- 工位流转矩阵 -->
+                        <div style="margin-bottom: 1rem;">
+                            <div style="font-weight: 600; margin-bottom: 0.5rem; color: var(--accent-cyan);"> 工区流转分析</div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                                <div>
+                                    <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem;">流转TOP路径</div>
+                                    <div id="stationFlowTopPaths" style="max-height: 150px; overflow-y: auto;"></div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem;">流转矩阵</div>
+                                    <div id="stationFlowMatrix" style="max-height: 200px; overflow: auto;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: Gantt -->
+            <div id="tab-gantt" class="tab-content">
+                <section class="schedule-workspace"><div class="page-heading"><div><div class="eyebrow">SCHEDULE EXPLORER</div><h2>排产甘特</h2><p id="ganttContext">载入或运行仿真后查看排产</p></div><div class="heading-actions"><button class="btn btn-secondary" onclick="exportGanttPNG()">导出 PNG</button><details class="view-menu"><summary>事件 CSV ⌄</summary><div class="menu-popover"><button onclick="exportGanttCSV(true)">导出当前筛选事件</button><button onclick="exportGanttCSV()">导出全部事件</button></div></details></div></div>
+                <div class="schedule-toolbar"><div class="segmented"><button class="active" data-gantt-view="product" onclick="ganttSetView('product')">产品</button><button data-gantt-view="worker" onclick="ganttSetView('worker')">人员</button><button data-gantt-view="resource" onclick="ganttSetView('resource')">设备与工位</button></div><select id="ganttArea" aria-label="甘特工区"><option value="">全部工区</option></select><input id="ganttSearch" aria-label="搜索对象" placeholder="搜索对象编号"><select id="ganttType" aria-label="事件类型"><option value="">全部事件</option><option value="NORMAL">工作</option><option value="WAITING">等待</option><option value="REST">休息</option><option value="REWORK">返工</option><option value="IN_PROGRESS">未完成</option></select><button class="btn btn-secondary" onclick="document.getElementById('ganttArea').value='';document.getElementById('ganttSearch').value='';document.getElementById('ganttType').value='';updateGantt()">清除筛选</button></div>
+                <div class="schedule-range"><span>时间范围</span><button onclick="ganttRange('day')">日</button><button onclick="ganttRange('week')">周</button><button onclick="ganttRange('full')">全期</button><input id="ganttFrom" type="number" min="0" value="0" aria-label="起始分钟"><span>至</span><input id="ganttTo" type="number" min="0" value="1" aria-label="结束分钟"><span>分钟</span><button onclick="ganttRange('custom')">应用</button><span class="range-spacer"></span><button onclick="ganttZoom(1/1.4)" aria-label="缩小">−</button><button onclick="ganttZoom(1.4)" aria-label="放大">＋</button></div>
+                <div class="schedule-body"><div class="schedule-plot"><div id="ganttScroll"><div id="ganttSpacer"></div></div><canvas id="scheduleCanvas" aria-label="排产时间图"></canvas></div><aside id="ganttDetails" class="task-details"><div class="detail-empty">选择一项任务<br><small>查看人员、资源与执行记录</small></div></aside></div>
+                <footer class="schedule-footer"><div class="schedule-legend"><span><i style="background:#367bea"></i>工作</span><span><i style="background:#d99129"></i>等待</span><span><i style="background:#919aaa"></i>休息</span><span><i style="background:#9466cf"></i>返工</span><span><i class="unfinished"></i>未完成</span></div><span id="ganttFooter">暂无仿真事件</span></footer></section>
+            </div>
+        </main>
     </div>
-    
+
+    <div id="areaLeaveDialog" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="areaLeaveTitle">
+        <div class="modal"><div class="modal-header"><h3 id="areaLeaveTitle">工区有未保存修改</h3></div><div class="modal-body">请选择保存后继续、放弃修改，或继续编辑当前属性。</div><div class="modal-footer"><button id="areaLeaveKeep" class="btn btn-secondary">继续编辑</button><button id="areaLeaveDiscard" class="btn btn-secondary">放弃修改</button><button id="areaLeaveSave" class="btn btn-primary">保存后继续</button></div></div>
+    </div>
+    <div class="simulation-progress-overlay" id="loading" hidden role="dialog" aria-modal="true" aria-labelledby="simulationProgressTitle" tabindex="-1">
+        <section class="simulation-progress-card">
+            <div class="simulation-progress-top"><span class="simulation-progress-symbol" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="simulation-progress-badge" id="simulationProgressBadge">计算中</span></div>
+            <div class="simulation-progress-eyebrow">ASSEMBLY SIMULATION</div>
+            <h2 id="simulationProgressTitle">仿真正在进行</h2>
+            <p class="simulation-progress-context" id="simulationProgressContext">工艺流程 · 资源调度 · 人因对比</p>
+            <div class="simulation-progress-reading"><div><div id="simulationProgressPhase" role="status" aria-live="polite">正在准备仿真</div><p id="simulationProgressDetail">正在提交计算任务，请稍候</p></div><strong id="simulationProgressValue">运行中</strong></div>
+            <div class="simulation-progress-bar indeterminate" id="simulationProgressBar" role="progressbar" aria-label="仿真总进度" aria-valuemin="0" aria-valuemax="100"><div id="simulationProgressFill"></div></div>
+            <div class="simulation-progress-steps"><span data-progress-step>准备任务</span><span data-progress-step>仿真计算</span><span data-progress-step>整理结果</span><span data-progress-step>完成</span></div>
+            <footer><span id="simulationProgressCount">0 道工序</span><span>已耗时 <b id="simulationProgressElapsed">00:00</b></span></footer>
+            <button type="button" class="btn btn-primary simulation-progress-close" id="simulationProgressClose" onclick="closeSimulationProgress()" hidden>关闭</button>
+        </section>
+    </div>
+
     <div class="toast-container" id="toastContainer"></div>
-    
+
     <div class="watermark">
         <div class="watermark-line">北京航空航天大学</div>
         <div class="watermark-line">Beihang University</div>
     </div>
-    
-    <input type="file" id="csvFileInput" accept=".csv" style="display: none;" onchange="handleCSVImport(event)">
-    <script src="js/config.js"></script>
-    <script src="js/state.js"></script>
-    <script src="js/data.js"></script>
-    <script src="js/utils.js"></script>
-    <script src="js/canvas.js"></script>
-    <script src="js/editor.js"></script>
-    <script src="js/layout.js"></script>
-    <script src="js/csv.js"></script>
-    <script src="js/simulation.js"></script>
-    <script src="js/analysis.js"></script>
-    <script src="js/charts.js"></script>
-    <script src="js/ui.js"></script>
-    <script src="js/main.js"></script>
+
+    <input type="file" id="csvFileInput" accept=".csv,.xlsx" style="display: none;" onchange="handleCSVImport(event)">
+    <script src="js/config.js?v=area-serial-20261021"></script>
+    <script src="js/state.js?v=bb57147a37"></script>
+    <script src="js/data.js?v=58771194ca"></script>
+    <script src="js/utils.js?v=a8c27d134a"></script>
+    <script src="js/simulation_progress.js?v=73c6b9ab9d"></script>
+    <script src="js/canvas.js?v=station-progress2"></script>
+    <script src="js/editor.js?v=station-progress2"></script>
+    <script src="js/layout.js?v=station-progress2"></script>
+    <script src="js/csv.js?v=station-progress2"></script>
+    <script src="js/result_view.js?v=station-progress2"></script>
+    <script src="js/station_progress_view.js?v=result-paging-20261021"></script>
+    <script src="js/simulation.js?v=result-paging-20261021"></script>
+    <script src="js/analysis.js?v=station-progress2"></script>
+    <script src="js/charts.js?v=result-paging-20261021"></script>
+    <script src="js/ui.js?v=2512dcde4d"></script>
+    <script src="js/main.js?v=6341b01829"></script>
+    <script src="js/capacity.js?v=area-serial-20261021"></script>
+    <script src="js/gantt_view.js?v=area-serial-20261021"></script>
+    <script src="js/workbench.js?v=area-serial-20261021"></script>
+    <script type="module" src="js/home_engine.js?v=4fcbd67e36"></script>
+    <script src="js/home.js?v=area-serial-20261021"></script>
 </body>
 </html>

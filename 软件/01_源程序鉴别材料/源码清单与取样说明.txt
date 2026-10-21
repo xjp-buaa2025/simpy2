@@ -1,0 +1,49 @@
+航空发动机装配排产仿真系统 V1.0 源码清单
+以下文件纳入源程序鉴别材料。未纳入日志、缓存、测试输出、第三方可执行文件和运行生成文件。
+
+app/__init__.py	11 行
+app/api/__init__.py	14 行
+app/api/config.py	297 行
+app/api/process.py	582 行
+app/api/results.py	566 行
+app/api/simulation.py	626 行
+app/core/__init__.py	28 行
+app/core/dag_scheduler.py	200 行
+app/core/equipment_manager.py	420 行
+app/core/event_collector.py	268 行
+app/core/sim_en	541 行
+app/core/simulation_engine.py	622 行
+app/core/task_executor.py	332 行
+app/core/worker_pool.py	277 行
+app/main.py	157 行
+app/models/__init__.py	57 行
+app/models/config_model.py	240 行
+app/models/enums.py	214 行
+app/models/gantt_model.py	283 行
+app/models/process_model.py	393 行
+app/models/result_model.py	354 行
+app/models/worker_model.py	239 行
+app/utils/__init__.py	99 行
+app/utils/csv_parser.py	301 行
+app/utils/statistics.py	751 行
+app/utils/time_converter.py	257 行
+app/utils/validators.py	351 行
+config/default_config.yaml	108 行
+frontend/css/styles.css	830 行
+frontend/index.html	546 行
+frontend/js/analysis.js	786 行
+frontend/js/canvas.js	651 行
+frontend/js/charts.js	408 行
+frontend/js/config.js	64 行
+frontend/js/csv.js	100 行
+frontend/js/data.js	86 行
+frontend/js/editor.js	136 行
+frontend/js/layout.js	223 行
+frontend/js/main.js	22 行
+frontend/js/simulation.js	213 行
+frontend/js/state.js	32 行
+frontend/js/ui.js	127 行
+frontend/js/utils.js	36 行
+
+源程序总行数：12934 行
+鉴别材料行数：3000 行；Word 编排：60 页，每页 50 行。

@@ -22,7 +22,7 @@ class ProcessNode(BaseModel):
     Attributes:
         step_id: 唯一步骤ID
         task_name: 任务名称
-        op_type: 操作类型（H/A/M/T/D）
+        op_type: 基础行为类型（H/A/M/T/D/S-Move/S-Rest/Coop）
         predecessors: 前置依赖（分号分隔）
         std_duration: 标准工时（分钟）
         time_variance: 时间波动方差
@@ -41,7 +41,7 @@ class ProcessNode(BaseModel):
         description="任务名称"
     )
     op_type: OpType = Field(
-        description="操作类型（H/A/M/T/D）"
+        description="基础行为类型（H/A/M/T/D/S-Move/S-Rest/Coop）"
     )
     predecessors: str = Field(
         default="",
@@ -54,7 +54,8 @@ class ProcessNode(BaseModel):
     time_variance: float = Field(
         default=0.0,
         ge=0,
-        description="时间波动方差（正态分布）"
+        description="工时波动标准差σ（分钟，正态分布）。注意：本字段按标准差使用，"
+                    "非方差σ²；样例数据中相对 std_duration 的取值即为标准差量级"
     )
     work_load_score: int = Field(
         default=5,
@@ -82,6 +83,9 @@ class ProcessNode(BaseModel):
         description="工位ID（必填）"
     )
     
+    area_id: str = ""
+    workstation_id: str = ""
+
     # 前端坐标（用于流程图编辑器）
     x: float = Field(
         default=0,
@@ -221,6 +225,7 @@ class ProcessDefinition(BaseModel):
         default=[],
         description="工艺节点列表"
     )
+    station_catalog: List[Dict[str, str]] = Field(default_factory=list, description="工位编号、工区与显示名称")
     
     def get_node_map(self) -> Dict[str, ProcessNode]:
         """

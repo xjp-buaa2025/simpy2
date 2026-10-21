@@ -30,6 +30,8 @@ class EventCollector:
             work_hours_per_day: 每日工作小时数（用于时间转换）
         """
         self.events: List[GanttEvent] = []
+        self.task_completion_events: List[Dict[str, Any]] = []
+        self._completed_tasks = {}
         self.work_hours_per_day = work_hours_per_day
         
         # 统计计数器
@@ -47,12 +49,27 @@ class EventCollector:
         self.events.append(event)
         
         # 更新统计
-        if event.op_type == "M":
+        if event.op_type == "M" and event.is_complete and event.event_type in (GanttEventType.NORMAL, GanttEventType.REWORK):
             self.total_inspections += 1
         if event.event_type == GanttEventType.REWORK:
             self.total_reworks += 1
             self.rework_time_total += (event.end_time - event.start_time)
     
+    def add_task_completion(self, engine_id, node, completed_at):
+        """Record a real scheduler release, after any mandatory rest, once."""
+        key = (engine_id, node.step_id)
+        event = dict(engine_id=engine_id, step_id=node.step_id,
+            station_id=node.workstation_id or node.area_id or node.station,
+            area_id=node.area_id or node.station, completed_at=float(completed_at),
+            std_duration=float(node.std_duration))
+        previous = self._completed_tasks.get(key)
+        if previous is not None:
+            if previous != event:
+                raise ValueError("同一发动机工序存在冲突的放行记录")
+            return
+        self._completed_tasks[key] = event
+        self.task_completion_events.append(event)
+
     def get_all_events(self) -> List[GanttEvent]:
         """获取所有事件"""
         return self.events

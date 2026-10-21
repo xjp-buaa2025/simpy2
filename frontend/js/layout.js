@@ -56,7 +56,8 @@ function autoLayout() {
 }
 
 // 按工位自动布局（UE蓝图风格）
-function autoLayoutByStation() {
+function autoLayoutByStation(collapseAll = true) {
+    Object.keys(stationContainers).forEach(k=>delete stationContainers[k]);
     // 按工位分组节点
     const stationGroups = {};
     state.nodes.forEach(node => {
@@ -116,9 +117,9 @@ function autoLayoutByStation() {
             y: currentY,
             width: containerWidth,
             height: containerHeight,
-            collapsed: false,
+            collapsed: collapseAll,
             color: station.color,
-            name: station.name
+            name: stationDisplayLabel(station.id, station.name)
         };
         
         // 布局节点
@@ -134,18 +135,23 @@ function autoLayoutByStation() {
         containersPerRow++;
     });
     
+    if (collapseAll) {
+        state.showStationContainers = true;
+        document.getElementById('showContainers').checked = true;
+        setCanvasLayoutMode('station-only');
+    }
     renderCanvas();
-    showToast('按工位布局完成', 'success');
+    showToast('按工区布局完成', 'success');
 }
 
 // 初始化工位筛选器
 function initStationFilter() {
     const select = document.getElementById('stationFilter');
-    select.innerHTML = '<option value="">全部工位</option>';
+    select.innerHTML = '<option value="">全部工区</option>';
     state.stations.forEach(st => {
         const opt = document.createElement('option');
         opt.value = st.id;
-        opt.textContent = st.name;
+        opt.textContent = stationDisplayLabel(st.id, st.name);
         select.appendChild(opt);
     });
 }
@@ -164,39 +170,67 @@ function toggleContainers() {
 }
 
 // 清空画布
-function clearCanvas() {
+function clearCanvas(force = false) {
+    if(!force&&typeof guardAreaTransition==='function'){guardAreaTransition(()=>clearCanvas(true));return;}
     if (!confirm('确定要清空所有节点吗？')) return;
     state.nodes = [];
     state.edges = [];
     state.selectedNode = null;
+    if(typeof resetAreaEditorForProcess==='function')resetAreaEditorForProcess();
     Object.keys(stationContainers).forEach(k => delete stationContainers[k]);
     renderCanvas();
     showToast('画布已清空', 'success');
 }
 
-// 加载复杂示例
-function loadComplexExample() {
-    loadProcessData({ name: '压气机装配流程', nodes: COMPLEX_PROCESS_NODES });
-    
-    document.getElementById('numWorkers').value = 8;
-    document.getElementById('targetOutput').value = 3;
-    document.getElementById('workDaysPerMonth').value = 22;
-    
+// 加载复杂示例（基础案例，源自 data/3.csv；参数对齐实验配置 9.1.1）
+function loadComplexExample(force = false) {
+    if(!force&&typeof guardAreaTransition==='function'){guardAreaTransition(()=>loadComplexExample(true));return;}
+    loadProcessData({ name: '航空发动机整机装配流程', nodes: COMPLEX_PROCESS_NODES });
+
+    // 全局参数（依据 9.1.1 实验配置说明）
+    document.getElementById('workHoursPerDay').value = 8;     // 每日工作小时数
+    document.getElementById('workDaysPerMonth').value = 22;   // 每月工作天数
+
+    // 休息规则参数
+    document.getElementById('restTimeThreshold').value = 40;  // 连续工作触发阈值(分钟)
+    document.getElementById('restDurationTime').value = 10;   // 时间触发休息时长(分钟)
+    document.getElementById('restLoadThreshold').value = 5;   // 负荷触发阈值(REBA)
+    document.getElementById('restDurationLoad').value = 10;   // 负荷触发休息时长(分钟)
+
+    // 关键设备：试车台 x1
     state.config.criticalEquipment = {
-        '动平衡机': 2,
-        '检测台': 2,
-        '叶片安装夹具': 3,
-        '液压拉伸器': 2,
-        '感应加热器': 2,
-        '起重设备': 1
+        '试车台': 1
     };
     renderEquipmentList();
-    
-    showToast(`复杂示例流程已加载（${COMPLEX_PROCESS_NODES.length}个节点）`, 'success');
+
+    showToast(`基础案例已加载（${COMPLEX_PROCESS_NODES.length}个节点）`, 'success');
 }
 
-// 加载流程数据
-function loadProcessData(process) {
+// The active process owns the visible area list. A previous process never adds areas here.
+function stationDisplayLabel(id, label) {
+    return !label || label === id ? id : `${id} ${label}`;
+}
+function processStationCatalog(process, capacityModel = null) {
+    const used = new Set(process.nodes.map(n => n.area_id || n.station || 'ST01'));
+    const catalog = Array.isArray(process.station_catalog) ? process.station_catalog : [];
+    const entries = new Map();
+    for (const row of [...catalog, ...DEFAULT_STATIONS.map(s => ({station_id:s.id, area_id:s.id, label:s.name, color:s.color}))]) {
+        const id = row.area_id || row.station_id;
+        if (used.has(id) && !entries.has(id)) entries.set(id, {id, name:row.label || id, color:row.color || DEFAULT_STATIONS[entries.size % DEFAULT_STATIONS.length].color});
+    }
+    for (const id of used) if (!entries.has(id)) entries.set(id, {id, name:id, color:DEFAULT_STATIONS[entries.size % DEFAULT_STATIONS.length].color});
+    for (const station of entries.values()) if (capacityModel?.areas?.[station.id]?.label) station.name = capacityModel.areas[station.id].label;
+    return [...entries.values()];
+}
+
+// 加载流程数据；调用者在提交前验证完整候选输入。
+function loadProcessData(process, options = {}) {
+    if(typeof resetAreaEditorForProcess==='function')resetAreaEditorForProcess();
+    state.selectedNode=null;state.stationFilter=null;state.capacityModel=options.capacityModel || null;
+    state.capacityAutomaticWip=options.automaticWip ?? null;state.capacitySamplingScheme=options.samplingScheme || 'legacy';
+    state.processName=process.name || '工艺流程';state.processDescription=process.description || '';
+    state.stations=processStationCatalog(process, state.capacityModel);
+    initStationFilter();
     state.nodes = process.nodes.map((n, idx) => ({
         id: 'node_' + idx,
         stepId: n.step_id,
@@ -204,16 +238,17 @@ function loadProcessData(process) {
         opType: n.op_type,
         predecessors: n.predecessors || '',
         stdDuration: n.std_duration,
-        timeVariance: n.time_variance || 0,
-        workLoadScore: n.work_load_score || 5,
-        reworkProb: n.rework_prob || 0,
-        requiredWorkers: n.required_workers || 1,
+        timeVariance: n.time_variance ?? 0,
+        workLoadScore: n.work_load_score ?? 5,
+        reworkProb: n.rework_prob ?? 0,
+        requiredWorkers: n.required_workers ?? 1,
         requiredTools: Array.isArray(n.required_tools) ? n.required_tools.join(';') : (n.required_tools || ''),
-        station: n.station || 'ST01',
-        x: n.x || 50 + idx * 150,
-        y: n.y || 100
+        station: n.area_id || n.station || 'ST01',
+        workstationId: n.workstation_id || '',
+        x: n.x ?? 50 + idx * 150,
+        y: n.y ?? 100
     }));
     
     rebuildEdges();
-    autoLayoutByStation();
+    autoLayoutByStation(false);
 }

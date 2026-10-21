@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from app.api import config, process, simulation, results
+from app.api import config, process, simulation, results, unity_playback, factory_layout, pt6a29_layout
 
 # 创建FastAPI应用实例
 app = FastAPI(
@@ -46,6 +46,9 @@ if os.path.exists(frontend_dir):
 app.include_router(config.router, prefix="/api/config", tags=["配置管理"])
 app.include_router(process.router, prefix="/api/process", tags=["工艺流程"])
 app.include_router(simulation.router, prefix="/api/simulation", tags=["仿真控制"])
+app.include_router(unity_playback.router, prefix="/api/simulation/unity", tags=["Unity 同步播放"])
+app.include_router(factory_layout.router, prefix="/api/simulation/unity", tags=["工厂布局"])
+app.include_router(pt6a29_layout.router, prefix="/api/simulation/unity", tags=["原场景29工位物理布局"])
 app.include_router(results.router, prefix="/api/results", tags=["结果查询"])
 
 

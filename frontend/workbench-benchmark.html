@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><title>Workbench rendering regression harness</title>
+<style>body{margin:0;font:13px system-ui}header{height:70px;display:flex;gap:12px;align-items:center;padding:0 16px;background:#eef3fa}iframe{width:100%;height:calc(100vh - 70px);border:0}pre{margin:0;white-space:pre-wrap;font-size:11px}</style>
+<header><strong>隔离浏览器验收</strong><span>先通过内嵌页面载入测试方案</span><button id="bench">滚动、缩放、展示与零写请求检查</button><button id="download">下载报告</button><pre id="report">等待方案</pre></header><iframe id="app" src="/"></iframe>
+<script>
+let report=null;
+document.getElementById('bench').onclick=async()=>{
+ const w=document.getElementById('app').contentWindow,d=w.document,scroll=d.getElementById('ganttScroll'),canvas=d.getElementById('scheduleCanvas');if(!d.getElementById('presentMain')||d.getElementById('presentMain').disabled){document.getElementById('report').textContent='请先载入含结果的测试方案';return;}
+ const writes=[],fetchBefore=w.fetch;w.fetch=(url,options={})=>{if(!['GET','HEAD'].includes((options.method||'GET').toUpperCase()))writes.push({url,method:options.method});return fetchBefore.call(w,url,options);};
+ try{
+ w.switchTab('gantt',true);w.ganttSetView('worker');w.ganttRange('full');const times=[],draws=[];let last=performance.now();
+ for(let i=0;i<180;i++)await new Promise(resolve=>requestAnimationFrame(now=>{times.push(now-last);last=now;if(i<100)scroll.scrollTop=(i*75)%Math.max(1,scroll.scrollHeight-scroll.clientHeight);else w.ganttZoom(i%2?1.05:1/1.05);draws.push(Number(scroll.dataset.drawMs)||0);resolve();}));
+ const countBefore=d.querySelectorAll('canvas').length;for(let i=0;i<20;i++){w.enterPresentation();w.ganttSetView(i%2?'product':'resource');w.exitPresentation();}
+ const rect=canvas.getBoundingClientRect();scroll.dispatchEvent(new w.MouseEvent('click',{bubbles:true,clientX:rect.left+240,clientY:rect.top+72}));
+ report={browser:w.navigator.userAgent,dpr:w.devicePixelRatio,viewport:{width:w.innerWidth,height:w.innerHeight},frames:times.length,meanFrameMs:times.reduce((a,b)=>a+b)/times.length,fps:1000/(times.reduce((a,b)=>a+b)/times.length),p95FrameMs:times.sort((a,b)=>a-b)[Math.floor(times.length*.95)],maxDrawMs:Math.max(...draws),adapterMs:Number(scroll.dataset.adaptMs),filterMs:Number(scroll.dataset.filterMs),pickMs:Number(scroll.dataset.pickMs),cycles:20,canvasesBefore:countBefore,canvasesAfter:d.querySelectorAll('canvas').length,writeRequests:writes};
+ document.getElementById('report').textContent=JSON.stringify(report);document.getElementById('bench').dataset.complete='true';
+ }finally{w.fetch=fetchBefore;}
+};
+document.getElementById('download').onclick=()=>{if(!report)return;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));a.download='browser-performance.json';a.click();};
+</script>

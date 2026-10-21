@@ -1,17 +1,7 @@
-"""
-工人池管理器
-使用SimPy FilterStore管理工人资源
+"""On-demand worker identities with atomic reservations and persistent fatigue.
 
-功能:
-- 工人资源的获取与释放
-- 按状态过滤获取空闲工人
-- 休息逻辑实现（工人休息期间仍被任务持有）
-- 工人状态跟踪与统计
-
-设计要点:
-- 休息期间工人仍被任务持有，休息结束后才归还Store
-- 支持按数量请求工人
-- 记录工人的工作时间、休息时间统计
+An empty roster grows only when no idle team is available. Worker identities are
+reused deterministically; no configured headcount limits production.
 """
 
 from typing import Dict, List, Generator, Optional
@@ -26,7 +16,7 @@ class WorkerPool:
     """
     工人池管理器
     
-    使用SimPy FilterStore实现工人资源管理
+    按实际并发需求扩充工人记录，不设置人数上限
     支持按状态过滤获取空闲工人
     """
     
@@ -39,65 +29,38 @@ class WorkerPool:
             config: 全局配置
         """
         self.env = env
+        # Shared across every product executor in this simulation run.
+        self.area_locks = {}
         self.config = config
-        self.store = simpy.FilterStore(env)
         self.workers: Dict[str, WorkerAgent] = {}
-        
-        # 初始化工人
-        for i in range(config.num_workers):
-            worker_id = f"Worker_{i+1:02d}"
-            worker = WorkerAgent(id=worker_id)
-            self.workers[worker_id] = worker
-            self.store.put(worker)
-    
-    def request_workers(self, count: int) -> Generator:
-        """
-        请求指定数量的空闲工人（负载均衡分配）
-        
-        优先选择累计工作时间最少的工人，实现均衡分配
-        
-        Args:
-            count: 需要的工人数量
-            
-        Yields:
-            获取工人的SimPy事件
-            
-        Returns:
-            获取到的工人列表
-        """
-        workers = []
-        for _ in range(count):
-            # 获取所有空闲工人并按工作时间排序
-            idle_workers = [w for w in self.store.items if w.state == WorkerState.IDLE]
-            
-            if idle_workers:
-                # 选择累计工作时间最少的工人（负载均衡）
-                idle_workers.sort(key=lambda w: w.total_work_time)
-                target_id = idle_workers[0].id
-                
-                # 从store中获取指定工人
-                worker = yield self.store.get(lambda w: w.id == target_id)
-            else:
-                # 没有空闲工人，等待任意一个空闲工人
-                worker = yield self.store.get(
-                    lambda w: w.state == WorkerState.IDLE
-                )
-            
+        self.sequence = 0
+
+    def reserve_now(self, count: int) -> List[WorkerAgent]:
+        """Atomically reserve an entire team; capacity never blocks production."""
+        if not isinstance(count, int) or count < 1:
+            raise ValueError("作业人数必须为正整数")
+        idle = sorted((w for w in self.workers.values() if w.state == WorkerState.IDLE),
+                      key=lambda w: (w.total_work_time, int(w.id.rsplit('_', 1)[1])))
+        selected = idle[:count]
+        while len(selected) < count:
+            self.sequence += 1
+            worker = WorkerAgent(id=f"Worker_{self.sequence:02d}")
+            self.workers[worker.id] = worker
+            selected.append(worker)
+        for worker in selected:
             worker.state = WorkerState.WORKING
-            workers.append(worker)
+        return selected
+
+    def request_workers(self, count: int) -> Generator:
+        workers = self.reserve_now(count)
+        yield self.env.event().succeed()
         return workers
-    
+
     def release_workers(self, workers: List[WorkerAgent]):
-        """
-        释放工人回池
-        
-        Args:
-            workers: 要释放的工人列表
-        """
         for worker in workers:
             worker.state = WorkerState.IDLE
-            self.store.put(worker)
-    
+            worker.current_task_id = None
+
     def execute_rest(
         self, 
         workers: List[WorkerAgent], 
@@ -107,7 +70,7 @@ class WorkerPool:
         """
         执行休息进程
         
-        关键：工人在休息期间仍被当前任务"持有"，不归还Store
+        关键：工人在休息期间仍被当前任务"持有"，不释放给其他任务
         休息结束后恢复为工作状态（而非空闲）
         
         Args:
@@ -246,10 +209,5 @@ class WorkerPool:
             worker.tasks_completed += 1
     
     def reset_all_workers(self):
-        """
-        重置所有工人状态（用于新仿真）
-        """
-        for worker in self.workers.values():
-            worker.reset()
-            if worker not in self.store.items:
-                self.store.put(worker)
+        self.workers.clear()
+        self.sequence = 0

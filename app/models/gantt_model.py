@@ -44,6 +44,12 @@ class GanttEvent:
     worker_ids: List[str] = field(default_factory=list)
     equipment_used: List[str] = field(default_factory=list)
     rework_count: int = field(default=0)
+    area_id: str = ""
+    workstation_id: str = ""
+    wait_reason: str = ""
+    is_complete: bool = True
+    planned_end_time: Optional[float] = None
+    wait_resource_ids: List[str] = field(default_factory=list)
     
     @property
     def duration(self) -> float:
@@ -157,7 +163,11 @@ class GanttEvent:
             "event_type": self.event_type,
             "worker_ids": self.worker_ids,
             "equipment_used": self.equipment_used,
-            "rework_count": self.rework_count
+            "rework_count": self.rework_count,
+            "area_id": self.area_id, "workstation_id": self.workstation_id,
+            "wait_reason": self.wait_reason, "is_complete": self.is_complete,
+            "planned_end_time": self.planned_end_time,
+            "wait_resource_ids": self.wait_resource_ids
         }
     
     def to_csv_row(self, work_hours_per_day: int = 8) -> List:

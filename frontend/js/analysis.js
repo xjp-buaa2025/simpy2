@@ -132,33 +132,6 @@ function performBottleneckAnalysis(result) {
         }
     });
     
-    // 2. 分析工人瓶颈
-    if (result.worker_stats && result.worker_stats.length > 0) {
-        const avgUtil = result.worker_stats.reduce((sum, w) => sum + (w.utilization_rate || 0), 0) / result.worker_stats.length;
-        
-        if (avgUtil >= 0.85) {
-            bottlenecks.push({
-                resource_type: 'worker',
-                resource_id: '全体工人',
-                bottleneck_type: 'high_utilization',
-                severity: 'high',
-                utilization_rate: avgUtil,
-                impact_description: `工人平均利用率高达 ${(avgUtil*100).toFixed(1)}%，整体负荷过重`,
-                suggestion: '建议增加工人数量以提高产能和降低疲劳风险'
-            });
-        } else if (avgUtil >= 0.75) {
-            bottlenecks.push({
-                resource_type: 'worker',
-                resource_id: '全体工人',
-                bottleneck_type: 'high_utilization',
-                severity: 'medium',
-                utilization_rate: avgUtil,
-                impact_description: `工人平均利用率 ${(avgUtil*100).toFixed(1)}%，负荷较高`,
-                suggestion: '关注工人疲劳情况，考虑优化排班或增加人员'
-            });
-        }
-    }
-    
     // 3. 分析等待时间瓶颈 - 增强版，关联具体设备
     const waitEvents = (result.gantt_events || []).filter(e => e.event_type === 'WAITING');
     const stepWaitTimes = {};
@@ -343,9 +316,6 @@ function performBottleneckAnalysis(result) {
     
     // 计算效率评分
     let score = 100;
-    if (result.target_achievement_rate < 1.0) {
-        score -= (1.0 - result.target_achievement_rate) * 30;
-    }
     score -= highCount * 10;
     score -= mediumCount * 5;
     if (result.quality_stats && result.quality_stats.first_pass_rate < 0.9) {
@@ -366,29 +336,13 @@ function performBottleneckAnalysis(result) {
         recommendations.push(`【设备瓶颈】以下设备导致大量等待：${topEquip.map(b => `${b.resource_id}(等待${b.wait_time.toFixed(0)}分钟)`).join(', ')}。建议优先增加这些设备数量。`);
     }
     
-    const workerBottlenecks = bottlenecks.filter(b => b.resource_type === 'worker' && b.severity === 'high');
-    if (workerBottlenecks.length > 0) {
-        recommendations.push('【优先】增加工人数量或优化排班。当前工人负荷过重，可能影响产能和质量。');
-    }
-    
     const reworkBottlenecks = bottlenecks.filter(b => b.bottleneck_type === 'frequent_rework');
     if (reworkBottlenecks.length > 0) {
         recommendations.push(`【质量】关注高返工率任务：${reworkBottlenecks.slice(0, 3).map(b => b.resource_id).join(', ')}。建议加强质量控制。`);
     }
     
-    if (result.target_achievement_rate < 0.9) {
-        const gap = result.config.target_output - result.engines_completed;
-        recommendations.push(`【产量】当前产量缺口 ${gap} 台，建议综合以上措施提升产能。`);
-    }
-    
-    if (bottlenecks.length === 0) {
-        if (result.target_achievement_rate >= 1.0) {
-            recommendations.push('【良好】当前生产状态良好，无明显瓶颈。可考虑提高目标产量。');
-        } else {
-            recommendations.push('【分析】未检测到明显瓶颈，但产量未达标。建议检查工艺流程设计。');
-        }
-    }
-    
+    if (bottlenecks.length === 0)recommendations.push('本次评估未发现明显资源瓶颈，可通过同条件改善仿真比较实际产出。');
+
     return {
         bottlenecks: bottlenecks,
         summary: {

@@ -6,6 +6,7 @@ const state = {
     nodes: [],
     edges: [],
     selectedNode: null,
+    selectedArea: null,
     editingNode: null,
     simulationResult: null,
     stations: [...DEFAULT_STATIONS],
@@ -23,6 +24,7 @@ let isDragging = false;
 let isConnecting = false;
 let connectStart = null;
 let dragNode = null;
+let dragStationContainer = null;
 let dragOffset = { x: 0, y: 0 };
 let lastMouseEvent = null;
 

@@ -3,7 +3,8 @@
  */
 
 // 打开节点编辑模态框
-function openNodeModal(node) {
+function openNodeModal(node, force=false) {
+    if(!force&&typeof guardAreaTransition==='function'){guardAreaTransition(()=>openNodeModal(node,true));return;}
     state.editingNode = node;
     
     document.getElementById('nodeStepId').value = node.stepId;
@@ -19,7 +20,7 @@ function openNodeModal(node) {
     
     // 填充工位选项
     const stationSelect = document.getElementById('nodeStation');
-    stationSelect.innerHTML = '<option value="">-- 请选择工位 --</option>';
+    stationSelect.innerHTML = '<option value="">-- 请选择工区 --</option>';
     state.stations.forEach(st => {
         const opt = document.createElement('option');
         opt.value = st.id;
@@ -49,7 +50,7 @@ function saveNode() {
     // 验证工位（必填）
     const station = document.getElementById('nodeStation').value;
     if (!station) {
-        showToast('请选择工位', 'warning');
+        showToast('请选择工区', 'warning');
         return;
     }
     
@@ -78,6 +79,7 @@ function saveNode() {
     
     rebuildEdges();
     closeNodeModal();
+    if(typeof refreshCleanAreaInspector==='function')refreshCleanAreaInspector();
     renderCanvas();
     showToast('节点已保存', 'success');
 }
@@ -103,6 +105,7 @@ function deleteNode() {
     
     state.selectedNode = null;
     closeNodeModal();
+    if(typeof refreshCleanAreaInspector==='function')refreshCleanAreaInspector();
     renderCanvas();
     showToast('节点已删除', 'success');
 }

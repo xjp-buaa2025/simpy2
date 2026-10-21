@@ -21,13 +21,27 @@ const DEFAULT_STATIONS = [
 ];
 
 // 操作类型颜色
-const OP_TYPE_COLORS = {
+const DEFAULT_OP_TYPE_COLORS = {
     'H': '#3b82f6',  // 取/放 - 蓝色
     'A': '#10b981',  // 装配 - 绿色
     'M': '#f59e0b',  // 测量 - 橙色
     'T': '#8b5cf6',  // 工具操作 - 紫色
-    'D': '#6b7280'   // 数据记录 - 灰色
+    'D': '#6b7280',  // 数据记录 - 灰色
+    'S-Move': '#06b6d4',
+    'S-Rest': '#84cc16',
+    'Coop': '#ec4899'
 };
+const OP_TYPE_COLORS = { ...DEFAULT_OP_TYPE_COLORS };
+const BEHAVIOR_UNITS = [
+    { type: 'H', name: '取 / 放', english: 'Handle' },
+    { type: 'A', name: '装配', english: 'Assemble' },
+    { type: 'M', name: '测量 & 检验', english: 'Measure' },
+    { type: 'T', name: '工具 & 工装操作', english: 'Tooling' },
+    { type: 'D', name: '数据记录', english: 'Document' },
+    { type: 'S-Move', name: '工间移动', english: 'Shift-Move' },
+    { type: 'S-Rest', name: '工间休息', english: 'Shift-Rest' },
+    { type: 'Coop', name: '作业协同沟通', english: 'Co-operation' }
+];
 
 // 操作类型图标
 const OP_TYPE_ICONS = {
@@ -35,7 +49,10 @@ const OP_TYPE_ICONS = {
     'A': '🔧',
     'M': '📏',
     'T': '🛠️',
-    'D': '📝'
+    'D': '📝',
+    'S-Move': '↔',
+    'S-Rest': '☕',
+    'Coop': '💬'
 };
 
 // 工位容器状态（位置、大小、折叠状态）
@@ -45,8 +62,6 @@ const stationContainers = {};
 const DEFAULT_CONFIG = {
     workHoursPerDay: 8,
     workDaysPerMonth: 22,
-    numWorkers: 8,
-    targetOutput: 3,
     criticalEquipment: {
         '动平衡机': 2,
         '检测台': 2,
@@ -60,5 +75,5 @@ const DEFAULT_CONFIG = {
     restLoadThreshold: 7,
     restDurationLoad: 3,
     pipelineMode: true,
-    stationConstraintMode: false
+    stationConstraintMode: true
 };

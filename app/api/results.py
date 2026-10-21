@@ -55,9 +55,12 @@ class KPIData(BaseModel):
     """KPI数据"""
     # 产量指标
     engines_completed: int = Field(description="完成发动机数量")
-    target_output: int = Field(description="目标产量")
-    target_achievement_rate: float = Field(description="计划达成率")
+    target_output: Optional[int] = Field(default=None, description="已停用")
+    target_achievement_rate: Optional[float] = Field(default=None, description="已停用")
     
+    labor_minutes: float = 0
+    peak_working_workers: int = 0
+
     # 时间指标
     total_sim_time: float = Field(description="总仿真时间（分钟）")
     avg_cycle_time: float = Field(description="平均单台周期时间（分钟）")
@@ -126,6 +129,27 @@ async def get_simulation_result(sim_id: str):
     )
 
 
+@router.get("/{sim_id}/station-progress", response_model=APIResponse)
+def get_station_progress(
+    sim_id: str,
+    time_minutes: Optional[float] = Query(default=None, description="仿真分钟；省略时查询期末"),
+    station_id: Optional[str] = Query(default=None, description="实体工位编号"),
+    engine_id: Optional[int] = Query(default=None, ge=1, description="发动机编号"),
+):
+    from app.core.station_progress import sample_station_progress
+
+    result = simulation_results.get(sim_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"仿真结果 {sim_id} 不存在")
+    if result.station_progress is None:
+        raise HTTPException(status_code=409, detail="该结果缺少工序放行记录，请重新仿真后查询工位进度")
+    try:
+        data = sample_station_progress(result.station_progress, time_minutes, station_id, engine_id)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return APIResponse(success=True, message="获取工位进度成功", data=data)
+
+
 @router.get("/list/all", response_model=APIResponse)
 async def list_all_results(
     limit: int = Query(default=20, ge=1, le=100, description="返回数量限制"),
@@ -147,13 +171,11 @@ async def list_all_results(
             "sim_id": sim_id,
             "status": result.status.value,
             "engines_completed": result.engines_completed,
-            "target_achievement_rate": round(result.target_achievement_rate * 100, 1),
+            "target_achievement_rate": None,
             "avg_cycle_time_hours": round(result.avg_cycle_time / 60, 2),
             "created_at": result.created_at,
             "completed_at": result.completed_at,
             "config_summary": {
-                "num_workers": result.config.num_workers,
-                "target_output": result.config.target_output,
                 "work_days": result.config.work_days_per_month
             }
         })
@@ -273,7 +295,9 @@ async def get_kpi_data(sim_id: str):
     
     kpi = KPIData(
         engines_completed=result.engines_completed,
-        target_output=result.config.target_output,
+        labor_minutes=result.evaluation_context.get("labor_minutes", 0),
+        peak_working_workers=result.evaluation_context.get("peak_working_workers", 0),
+        target_output=None,
         target_achievement_rate=result.target_achievement_rate,
         total_sim_time=result.sim_duration,
         avg_cycle_time=result.avg_cycle_time,
@@ -433,10 +457,13 @@ async def export_report(sim_id: str):
         "summary": {
             "status": result.status.value,
             "engines_completed": result.engines_completed,
-            "target_achievement_rate": f"{result.target_achievement_rate * 100:.1f}%",
+            "target_achievement_rate": None,
             "avg_cycle_time": f"{result.avg_cycle_time / 60:.2f} 小时",
             "total_sim_time": f"{result.sim_duration / 60:.2f} 小时"
         },
+        "evaluation_context": result.evaluation_context,
+        "engine_completion_events": result.engine_completion_events,
+        "station_progress": result.station_progress,
         "quality_stats": result.quality_stats.model_dump(),
         "worker_stats": [w.model_dump() for w in result.worker_stats],
         "equipment_stats": [e.model_dump() for e in result.equipment_stats],

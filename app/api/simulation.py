@@ -14,6 +14,8 @@ import time
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from enum import Enum
+from app.models.enums import OpType
+from app.core.run_progress import run_progress
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 
@@ -29,15 +31,6 @@ class SimulationStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
-
-
-class OpType(str, Enum):
-    """操作类型枚举"""
-    H = "H"
-    A = "A"
-    M = "M"
-    T = "T"
-    D = "D"
 
 
 # ============ 数据模型 ============
@@ -57,6 +50,8 @@ class ProcessNode(BaseModel):
     required_workers: int = Field(default=1, ge=1)
     required_tools: List[str] = []
     station: str = ""  # 工位ID
+    area_id: str = ""
+    workstation_id: str = ""
     x: float = 0
     y: float = 0
 
@@ -66,12 +61,15 @@ class ProcessDefinition(BaseModel):
     name: str = "未命名流程"
     description: str = ""
     nodes: List[ProcessNode] = []
+    station_catalog: List[Dict[str, str]] = Field(default_factory=list)
 
 
 class SimulationRequest(BaseModel):
     """仿真请求"""
     config: GlobalConfig
     process: ProcessDefinition
+    publish_to_clients: bool = True
+    progress_id: Optional[str] = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{8,80}$")
 
 
 class GanttEvent(BaseModel):
@@ -86,6 +84,12 @@ class GanttEvent(BaseModel):
     worker_ids: List[str] = Field(default=[], description="执行工人列表")
     equipment_used: List[str] = Field(default=[], description="使用的关键设备")
     rework_count: int = Field(default=0, description="返工次数")
+    area_id: str = ""
+    workstation_id: str = ""
+    wait_reason: str = ""
+    is_complete: bool = True
+    planned_end_time: Optional[float] = None
+    wait_resource_ids: List[str] = Field(default_factory=list)
 
 
 class ResourceUtilization(BaseModel):
@@ -115,7 +119,7 @@ class SimulationResult(BaseModel):
     config: GlobalConfig = Field(description="使用的配置")
     sim_duration: float = Field(description="实际仿真时长（分钟）")
     engines_completed: int = Field(description="完成发动机数量")
-    target_achievement_rate: float = Field(description="计划达成率")
+    target_achievement_rate: Optional[float] = Field(default=None, description="已停用")
     avg_cycle_time: float = Field(description="平均单台周期时间（分钟）")
     worker_stats: List[ResourceUtilization] = Field(default=[], description="工人统计")
     equipment_stats: List[ResourceUtilization] = Field(default=[], description="设备统计")
@@ -124,6 +128,13 @@ class SimulationResult(BaseModel):
     time_mapping: Dict[str, Any] = Field(default={}, description="时间映射元数据")
     created_at: str = Field(description="创建时间")
     completed_at: Optional[str] = Field(default=None, description="完成时间")
+    area_stats: List[Dict[str, Any]] = Field(default_factory=list)
+    area_completion_events: List[Dict[str, Any]] = Field(default_factory=list)
+    engine_completion_events: List[Dict[str, Any]] = Field(default_factory=list)
+    resource_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    evaluation_context: Dict[str, Any] = Field(default_factory=dict)
+    input_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    station_progress: Optional[Dict[str, Any]] = Field(default=None, description="按工位和发动机保存的放行进度及完成时间线")
 
 
 class APIResponse(BaseModel):
@@ -155,172 +166,107 @@ def generate_mock_simulation_result(
     config: GlobalConfig,
     process: ProcessDefinition
 ) -> SimulationResult:
-    """
-    生成模拟仿真结果（用于测试）
-    实际应用中应使用SimPy仿真引擎
-    """
-    import random
-    
-    # 计算基本参数
-    total_std_time = sum(node.std_duration for node in process.nodes)
-    sim_time = config.sim_time_minutes
-    
-    # 估算产能
-    estimated_engines = max(1, int(sim_time / (total_std_time * 1.2)))
-    engines_completed = min(estimated_engines, config.target_output + 1)
-    
-    # 生成甘特图事件
-    gantt_events = []
-    current_time = 0
-    
-    for engine_id in range(1, engines_completed + 1):
-        completed_nodes = set()
-        node_map = {n.step_id: n for n in process.nodes}
-        
-        while len(completed_nodes) < len(process.nodes):
-            # 找到可执行的节点
-            for node in process.nodes:
-                if node.step_id in completed_nodes:
-                    continue
-                
-                # 检查前置依赖
-                preds = [p.strip() for p in node.predecessors.split(';') if p.strip()]
-                if all(p in completed_nodes for p in preds):
-                    # 计算实际耗时（加入方差）
-                    variance = node.time_variance
-                    actual_duration = max(1, node.std_duration + random.gauss(0, variance))
-                    
-                    # 创建事件
-                    event = GanttEvent(
-                        engine_id=engine_id,
-                        step_id=node.step_id,
-                        task_name=node.task_name,
-                        op_type=node.op_type.value,
-                        start_time=current_time,
-                        end_time=current_time + actual_duration,
-                        event_type="NORMAL",
-                        worker_ids=[f"Worker_{i:02d}" for i in range(1, node.required_workers + 1)],
-                        equipment_used=node.required_tools[:1] if node.required_tools else [],
-                        rework_count=0
-                    )
-                    gantt_events.append(event)
-                    
-                    # 处理返工
-                    if node.op_type == OpType.M and random.random() < node.rework_prob:
-                        rework_event = GanttEvent(
-                            engine_id=engine_id,
-                            step_id=node.step_id,
-                            task_name=f"{node.task_name}(返工)",
-                            op_type=node.op_type.value,
-                            start_time=current_time + actual_duration,
-                            end_time=current_time + actual_duration * 2,
-                            event_type="REWORK",
-                            worker_ids=event.worker_ids,
-                            equipment_used=event.equipment_used,
-                            rework_count=1
-                        )
-                        gantt_events.append(rework_event)
-                        current_time += actual_duration
-                    
-                    current_time += actual_duration
-                    completed_nodes.add(node.step_id)
-                    break
-    
-    # 计算统计数据
-    total_work_time = sum(e.end_time - e.start_time for e in gantt_events if e.event_type == "NORMAL")
-    total_rework_time = sum(e.end_time - e.start_time for e in gantt_events if e.event_type == "REWORK")
-    
-    # 工人统计
-    worker_stats = []
-    for i in range(1, config.num_workers + 1):
-        worker_id = f"Worker_{i:02d}"
-        worker_events = [e for e in gantt_events if worker_id in e.worker_ids]
-        work_time = sum(e.end_time - e.start_time for e in worker_events)
-        rest_time = work_time * 0.1  # 假设10%休息时间
-        
-        worker_stats.append(ResourceUtilization(
-            resource_id=worker_id,
-            resource_type="WORKER",
-            total_time=sim_time,
-            work_time=work_time,
-            rest_time=rest_time,
-            idle_time=sim_time - work_time - rest_time,
-            utilization_rate=work_time / sim_time if sim_time > 0 else 0,
-            tasks_completed=len(worker_events)
-        ))
-    
-    # 设备统计
-    equipment_stats = []
-    for equip_name, capacity in config.critical_equipment.items():
-        equip_events = [e for e in gantt_events if equip_name in e.equipment_used]
-        work_time = sum(e.end_time - e.start_time for e in equip_events)
-        
-        equipment_stats.append(ResourceUtilization(
-            resource_id=equip_name,
-            resource_type="EQUIPMENT",
-            total_time=sim_time * capacity,
-            work_time=work_time,
-            idle_time=sim_time * capacity - work_time,
-            utilization_rate=work_time / (sim_time * capacity) if sim_time > 0 else 0,
-            tasks_completed=len(equip_events)
-        ))
-    
-    # 质量统计
-    total_inspections = len([e for e in gantt_events if e.op_type == "M"])
-    total_reworks = len([e for e in gantt_events if e.event_type == "REWORK"])
-    
-    quality_stats = QualityStats(
-        total_inspections=total_inspections,
-        total_reworks=total_reworks,
-        first_pass_rate=(total_inspections - total_reworks) / total_inspections if total_inspections > 0 else 1.0,
-        rework_time_total=total_rework_time
-    )
-    
-    # 时间映射
-    time_mapping = {
-        "minutes_per_day": config.work_hours_per_day * 60,
-        "total_days": config.work_days_per_month,
-        "total_minutes": sim_time,
-        "work_hours_per_day": config.work_hours_per_day
-    }
-    
-    return SimulationResult(
-        sim_id=sim_id,
-        status=SimulationStatus.COMPLETED,
-        config=config,
-        sim_duration=current_time,
-        engines_completed=engines_completed,
-        target_achievement_rate=engines_completed / config.target_output if config.target_output > 0 else 0,
-        avg_cycle_time=current_time / engines_completed if engines_completed > 0 else 0,
-        worker_stats=worker_stats,
-        equipment_stats=equipment_stats,
-        quality_stats=quality_stats,
-        gantt_events=gantt_events,
-        time_mapping=time_mapping,
-        created_at=datetime.now().isoformat(),
-        completed_at=datetime.now().isoformat()
-    )
+    """Run the same production rules for the test endpoint, without publishing."""
+    from app.core.simulation_engine import SimulationEngine
+    from app.models.process_model import ProcessDefinition as CoreProcess
+    core_process = CoreProcess.model_validate(process.model_dump())
+    result = SimulationEngine(config.model_copy(deep=True), core_process).run()
+    data = result.to_dict()
+    data["sim_id"] = sim_id
+    if data.get("station_progress") is not None:
+        data["station_progress"]["sim_id"] = sim_id
+    data["gantt_events"] = [e.to_dict() for e in result.gantt_events]
+    return SimulationResult.model_validate(data)
 
 
-# ============ API端点 ============
+@router.get("/capacity/catalog")
+def capacity_catalog():
+    from app.core.area_capacity import verified_catalog
+    return {"success": True, "message": "已核验实体工位目录", "data": verified_catalog()}
+
+
+@router.post("/capacity/validate", response_model=APIResponse)
+def validate_capacity(request: SimulationRequest):
+    try:
+        if request.config.capacity_model.enabled:
+            from app.core.area_capacity import prepare_model, expansion_packages
+            from app.models.process_model import ProcessDefinition as CoreProcess
+            config, process, _ = prepare_model(request.config, CoreProcess.model_validate(request.process.model_dump()))
+            return APIResponse(success=True, message="方案验证通过", data={"expansions": expansion_packages(config, process),
+                "effective_station_slots": sum(config.capacity_model.workstations[s].capacity * config.capacity_model.areas[config.capacity_model.workstations[s].area_id].resource_sets for s in {n.workstation_id for n in process.nodes})})
+        return APIResponse(success=True, message="方案验证通过")
+    except ValueError as error:
+        return APIResponse(success=False, message=str(error))
+
+def _unity_snapshot(filename: str):
+    from pathlib import Path
+    from fastapi.responses import Response
+    path = Path(__file__).resolve().parents[2] / "results" / "unity_validation" / filename
+    try:
+        content = path.read_bytes()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="请先完成一次网页仿真以生成 Unity 回放")
+    return Response(content, media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/unity/replay.json")
+def unity_replay():
+    return _unity_snapshot("replay.json")
+
+
+@router.get("/unity/station-progress.json")
+def unity_station_progress():
+    """Latest published station timeline; independent of the legacy replay."""
+    try:
+        return _unity_snapshot("station_progress.json")
+    except HTTPException as error:
+        if error.status_code == 404:
+            raise HTTPException(status_code=404, detail="请先运行并发布一次仿真以生成工位进度数据") from error
+        raise
+
+
+@router.get("/unity/sync_status.json")
+async def unity_sync_status():
+    from pathlib import Path
+    from app.core.factory_layout import load_json
+    from app.api.factory_layout import store
+    path = Path(__file__).resolve().parents[2] / "results/unity_validation/sync_status.json"
+    data = load_json(path) if path.exists() else {"success": False}
+    try:
+        data.update(layout_revision=store.current['revision'], catalog_version=store.current['catalog_version'])
+    except (OSError, ValueError):
+        data['layout_revision'] = -1
+    return data
+
+
+@router.get("/progress/{progress_id}", response_model=APIResponse)
+def simulation_progress(progress_id: str):
+    snapshot = run_progress.snapshot(progress_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="尚未开始或进度已过期")
+    return APIResponse(success=True, message="仿真进度", data=snapshot)
+
 
 @router.post("/run", response_model=APIResponse)
-async def run_simulation(request: SimulationRequest, background_tasks: BackgroundTasks):
+def run_simulation(request: SimulationRequest, background_tasks: BackgroundTasks):
     """
     运行仿真
-    
+
     接收配置和工艺流程定义，启动仿真并返回结果
     同时运行无休息对比仿真
-    
+
     请求体:
     - config: 全局配置（排班、设备、休息规则等）
     - process: 工艺流程定义（节点列表）
-    
+
     响应:
     - success: 是否成功
     - message: 结果消息
     - data: 仿真结果（SimulationResult）包含人因对比数据
     """
+    # SimPy runs synchronously. A sync endpoint lets FastAPI run it in a worker
+    # thread while PC/VR replay and clock requests remain responsive.
+    progress_id = None
     try:
         # 验证输入
         if not request.process.nodes:
@@ -328,16 +274,24 @@ async def run_simulation(request: SimulationRequest, background_tasks: Backgroun
                 success=False,
                 message="工艺流程不能为空"
             )
-        
+
+        if request.progress_id:
+            run_progress.start(request.progress_id)
+            progress_id = request.progress_id
+
         # 导入真实仿真引擎
         from app.core.simulation_engine import SimulationEngine, SimulationEngineNoRest
         from app.models.process_model import ProcessDefinition as CoreProcess, ProcessNode as CoreNode
         from app.models.enums import OpType as CoreOpType
-        
+
         # 转换配置
-        core_config = request.config
-        core_config.random_seed = 42
-        
+        core_config = request.config.model_copy(deep=True)
+        if core_config.random_seed is None:
+            core_config.random_seed = 42
+        if core_config.evaluation.mode == "capacity" and not core_config.capacity_model.enabled:
+            run_progress.finish(progress_id, False, "能力评估需要先启用工区资源模型")
+            return APIResponse(success=False, message="能力评估需要先启用工区资源模型")
+
         # 转换工艺流程
         core_nodes = []
         for node in request.process.nodes:
@@ -352,23 +306,53 @@ async def run_simulation(request: SimulationRequest, background_tasks: Backgroun
                 rework_prob=node.rework_prob,
                 required_workers=node.required_workers,
                 required_tools=node.required_tools,
-                station=node.station or "ST01"
+                station=node.station or "ST01",
+                area_id=node.area_id,
+                workstation_id=node.workstation_id,
+                x=node.x, y=node.y
             ))
-        
+
         core_process = CoreProcess(
             name=request.process.name,
             description=request.process.description,
-            nodes=core_nodes
+            nodes=core_nodes,
+            station_catalog=request.process.station_catalog
         )
-        
+
         # 运行主仿真（考虑人因）
-        engine = SimulationEngine(core_config, core_process)
+        if core_config.capacity_model.enabled:
+            from app.core.area_capacity import AreaSimulationEngine
+            engine = AreaSimulationEngine(core_config, core_process)
+        else:
+            engine = SimulationEngine(core_config.model_copy(deep=True), core_process.model_copy(deep=True))
+        from app.core.dag_scheduler import DAGScheduler
+        valid, validation_message = DAGScheduler(core_process).validate()
+        if not valid:
+            run_progress.finish(progress_id, False, validation_message)
+            return APIResponse(success=False, message=validation_message)
+        if progress_id:
+            engine.progress_callback = lambda fraction, minute, total: run_progress.update(
+                progress_id, 4 + fraction * 44, "正在计算主仿真", "main",
+                simulation_minute=minute, total_minutes=total)
         result = engine.run()
-        
+        if result.status.value != "completed":
+            run_progress.finish(progress_id, False, "仿真未成功完成，请检查工艺流程")
+            return APIResponse(success=False, message="仿真未成功完成，请检查工艺流程")
+
         # 运行对比仿真（不考虑人因）
-        no_rest_engine = SimulationEngineNoRest(core_config, core_process)
-        no_rest_result = no_rest_engine.run()
-        
+        if core_config.capacity_model.enabled:
+            no_rest_engine = AreaSimulationEngine(core_config, core_process, no_rest=True)
+        else:
+            no_rest_engine = SimulationEngineNoRest(core_config.model_copy(deep=True), core_process.model_copy(deep=True))
+        run_progress.update(progress_id, 50, "正在计算人因对比", "comparison", simulation_minute=0)
+        if progress_id:
+            no_rest_engine.progress_callback = lambda fraction, minute, total: run_progress.update(
+                progress_id, 50 + fraction * 38, "正在计算人因对比", "comparison",
+                simulation_minute=minute, total_minutes=total)
+        comparison_result = no_rest_engine.run()
+        no_rest_result = comparison_result.to_dict() if core_config.capacity_model.enabled else comparison_result
+        run_progress.update(progress_id, 90, "正在整理仿真结果", "results")
+
         # 转换结果为API格式
         api_gantt_events = []
         for evt in result.gantt_events:
@@ -382,9 +366,13 @@ async def run_simulation(request: SimulationRequest, background_tasks: Backgroun
                 event_type=evt.event_type.value,
                 worker_ids=evt.worker_ids,
                 equipment_used=evt.equipment_used,
-                rework_count=evt.rework_count
+                rework_count=evt.rework_count,
+                area_id=evt.area_id, workstation_id=evt.workstation_id,
+                wait_reason=evt.wait_reason, is_complete=evt.is_complete,
+                planned_end_time=evt.planned_end_time,
+                wait_resource_ids=evt.wait_resource_ids
             ))
-        
+
         api_worker_stats = []
         for w in result.worker_stats:
             api_worker_stats.append(ResourceUtilization(
@@ -397,7 +385,7 @@ async def run_simulation(request: SimulationRequest, background_tasks: Backgroun
                 utilization_rate=w.utilization_rate,
                 tasks_completed=w.tasks_completed
             ))
-        
+
         api_equipment_stats = []
         for e in result.equipment_stats:
             api_equipment_stats.append(ResourceUtilization(
@@ -410,12 +398,12 @@ async def run_simulation(request: SimulationRequest, background_tasks: Backgroun
                 utilization_rate=e.utilization_rate,
                 tasks_completed=e.tasks_completed
             ))
-        
+
         # 构建响应数据
         response_data = {
             "sim_id": result.sim_id,
             "status": result.status.value,
-            "config": request.config.model_dump(),
+            "config": result.config.model_dump(),
             "sim_duration": result.sim_duration,
             "engines_completed": result.engines_completed,
             "target_achievement_rate": result.target_achievement_rate,
@@ -436,6 +424,14 @@ async def run_simulation(request: SimulationRequest, background_tasks: Backgroun
             # 人因对比数据
             "no_rest_comparison": no_rest_result,
             # 添加工人疲劳度历史数据
+            "area_stats": result.area_stats,
+            "area_completion_events": result.area_completion_events,
+            "engine_completion_events": result.engine_completion_events,
+            "resource_snapshot": result.resource_snapshot,
+            "evaluation_context": result.evaluation_context,
+            "input_snapshot": {"config": result.config.model_dump() if core_config.capacity_model.enabled else core_config.model_dump(),
+                               "process": engine.process.model_dump() if core_config.capacity_model.enabled else core_process.model_dump()},
+            "station_progress": result.station_progress,
             "worker_fatigue_data": [
                 {
                     "worker_id": w.resource_id,
@@ -447,7 +443,7 @@ async def run_simulation(request: SimulationRequest, background_tasks: Backgroun
                 for w in result.worker_stats
             ]
         }
-        
+
         # 存储结果到全局字典，供后续API（如瓶颈分析）使用
         api_result = SimulationResult(
             sim_id=result.sim_id,
@@ -468,17 +464,50 @@ async def run_simulation(request: SimulationRequest, background_tasks: Backgroun
             gantt_events=api_gantt_events,
             time_mapping=result.time_mapping,
             created_at=result.created_at,
-            completed_at=result.completed_at
+            completed_at=result.completed_at,
+            area_stats=result.area_stats, area_completion_events=result.area_completion_events,
+            engine_completion_events=result.engine_completion_events,
+            resource_snapshot=result.resource_snapshot, evaluation_context=result.evaluation_context,
+            input_snapshot=response_data["input_snapshot"],
+            station_progress=result.station_progress
         )
         simulation_results[result.sim_id] = api_result
-        
+        run_progress.update(progress_id, 96, "正在同步仿真结果" if request.publish_to_clients else "正在完成结果处理", "results")
+        if request.publish_to_clients:
+            # Publish the same run the webpage receives, including its work calendar.
+            from tools.unity_validation import publication_lock
+            with publication_lock:
+                try:
+                    from tools.unity_validation import publish_result
+                    response_data["unity_sync"] = publish_result(response_data, engine.process if core_config.capacity_model.enabled else request.process)
+                except Exception as sync_error:
+                    response_data["unity_sync"] = {"success": False, "message": str(sync_error)}
+                    import logging
+                    logging.getLogger(__name__).warning("Unity replay publication failed: %s", sync_error)
+                    try:
+                        from tools.unity_validation import OUTPUT, atomic_write, supports_legacy_replay
+                        import json
+                        OUTPUT.mkdir(parents=True, exist_ok=True)
+                        publication_process = engine.process if core_config.capacity_model.enabled else request.process
+                        status_file = "sync_status.json" if supports_legacy_replay(publication_process) else "station_progress_status.json"
+                        atomic_write(OUTPUT / status_file, json.dumps(
+                            {"success": False, "sim_id": result.sim_id, "message": str(sync_error)},
+                            ensure_ascii=False).encode("utf-8"))
+                    except Exception:
+                        logging.getLogger(__name__).exception("Could not record Unity synchronization failure")
+
+        else:
+            response_data["unity_sync"] = {"success": True, "skipped": True}
+
+        run_progress.finish(progress_id, True)
         return APIResponse(
             success=True,
             message=f"仿真完成，产出 {result.engines_completed} 台发动机",
             data=response_data
         )
-        
+
     except Exception as e:
+        run_progress.finish(progress_id, False, str(e))
         import traceback
         traceback.print_exc()
         return APIResponse(
@@ -491,13 +520,13 @@ async def run_simulation(request: SimulationRequest, background_tasks: Backgroun
 async def run_test_simulation():
     """
     运行测试仿真
-    
+
     使用默认配置和示例工艺流程运行一次快速仿真
     用于验证系统功能
     """
     # 默认配置
     config = GlobalConfig()
-    
+
     # 示例工艺流程
     process = ProcessDefinition(
         name="测试流程",
@@ -508,11 +537,11 @@ async def run_test_simulation():
             ProcessNode(step_id="T004", task_name="记录", op_type=OpType.D, predecessors="T003", std_duration=5),
         ]
     )
-    
+
     sim_id = str(uuid.uuid4())
     result = generate_mock_simulation_result(sim_id, config, process)
     simulation_results[sim_id] = result
-    
+
     return APIResponse(
         success=True,
         message=f"测试仿真完成，产出 {result.engines_completed} 台",
@@ -524,7 +553,7 @@ async def run_test_simulation():
 async def get_simulation_status(sim_id: str):
     """
     获取仿真状态
-    
+
     查询指定仿真任务的当前状态和进度
     """
     if sim_id not in simulation_results:
@@ -532,10 +561,10 @@ async def get_simulation_status(sim_id: str):
             success=False,
             message=f"仿真 {sim_id} 不存在"
         )
-    
+
     result = simulation_results[sim_id]
     is_running = running_simulations.get(sim_id, False)
-    
+
     return APIResponse(
         success=True,
         message=f"仿真状态: {result.status.value}",
@@ -554,7 +583,7 @@ async def get_simulation_status(sim_id: str):
 async def stop_simulation(sim_id: str):
     """
     停止仿真
-    
+
     中止正在运行的仿真任务
     """
     if sim_id not in simulation_results:
@@ -562,19 +591,19 @@ async def stop_simulation(sim_id: str):
             success=False,
             message=f"仿真 {sim_id} 不存在"
         )
-    
+
     if not running_simulations.get(sim_id, False):
         return APIResponse(
             success=False,
             message="仿真未在运行中"
         )
-    
+
     # 标记停止
     running_simulations[sim_id] = False
     result = simulation_results[sim_id]
     result.status = SimulationStatus.CANCELLED
     result.completed_at = datetime.now().isoformat()
-    
+
     return APIResponse(
         success=True,
         message="仿真已停止"
@@ -585,7 +614,7 @@ async def stop_simulation(sim_id: str):
 async def list_simulations():
     """
     列出所有仿真记录
-    
+
     返回所有仿真任务的概要信息
     """
     summaries = []
@@ -598,10 +627,10 @@ async def list_simulations():
             "created_at": result.created_at,
             "completed_at": result.completed_at
         })
-    
+
     # 按创建时间倒序
     summaries.sort(key=lambda x: x["created_at"], reverse=True)
-    
+
     return APIResponse(
         success=True,
         message=f"共 {len(summaries)} 条仿真记录",
@@ -613,13 +642,13 @@ async def list_simulations():
 async def clear_simulations():
     """
     清除所有仿真记录
-    
+
     删除所有历史仿真数据（谨慎使用）
     """
     count = len(simulation_results)
     simulation_results.clear()
     running_simulations.clear()
-    
+
     return APIResponse(
         success=True,
         message=f"已清除 {count} 条仿真记录"

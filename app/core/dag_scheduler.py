@@ -67,6 +67,16 @@ class DAGScheduler:
         Returns:
             (是否有效, 验证消息)
         """
+        ids = [node.step_id for node in self.process.nodes]
+        if any(not step.strip() for step in ids):
+            return False, "工序编号不能为空"
+        if len(set(ids)) != len(ids):
+            return False, "工序编号不能重复"
+        for node in self.process.nodes:
+            missing = [step for step in node.get_predecessor_list() if step not in self.node_map]
+            if missing:
+                return False, f"工序 {node.step_id} 的前置工序不存在: {';'.join(missing)}"
+
         # 检查是否为DAG（无环）
         if not nx.is_directed_acyclic_graph(self.graph):
             try:

@@ -3,7 +3,7 @@
 包含系统中使用的所有枚举类型
 
 枚举类:
-- OpType: 操作类型（H/A/M/T/D）
+- OpType: 基础行为类型（H/A/M/T/D/S-Move/S-Rest/Coop）
 - WorkerState: 工人状态
 - GanttEventType: 甘特图事件类型
 - ResourceType: 资源类型
@@ -30,6 +30,15 @@ class OpType(str, Enum):
     M = "M"  # 测量 - 可触发返工
     T = "T"  # 工具操作
     D = "D"  # 数据记录
+    S_MOVE = "S-Move"  # 工间移动
+    S_REST = "S-Rest"  # 工间休息
+    COOP = "Coop"  # 作业协同沟通
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            return next((member for member in cls if member.value.casefold() == value.strip().casefold()), None)
+        return None
 
 
 class WorkerState(str, Enum):
@@ -60,6 +69,7 @@ class GanttEventType(str, Enum):
     REST = "REST"
     REWORK = "REWORK"
     WAITING = "WAITING"
+    IN_PROGRESS = "IN_PROGRESS"
 
 
 class ResourceType(str, Enum):
@@ -109,6 +119,18 @@ class RestTriggerType(str, Enum):
 # ============ 操作类型元数据 ============
 
 OP_TYPE_META = {
+    OpType.S_MOVE: {
+        "zh": "工间移动", "en": "Shift-Move", "color": "#06B6D4",
+        "icon": "↔", "description": "工序之间的移动行为"
+    },
+    OpType.S_REST: {
+        "zh": "工间休息", "en": "Shift-Rest", "color": "#84CC16",
+        "icon": "☕", "description": "流程中显式安排的工间休息单元"
+    },
+    OpType.COOP: {
+        "zh": "作业协同沟通", "en": "Co-operation", "color": "#EC4899",
+        "icon": "💬", "description": "作业人员之间的协同沟通行为"
+    },
     OpType.H: {
         "zh": "取/放",
         "en": "Handling",

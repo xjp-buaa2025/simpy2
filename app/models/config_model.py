@@ -10,7 +10,8 @@
 """
 
 from typing import Dict, Optional
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, model_validator
+from app.models.capacity_model import CapacityModel, EvaluationSettings
 
 
 class GlobalConfig(BaseModel):
@@ -22,15 +23,27 @@ class GlobalConfig(BaseModel):
     Attributes:
         work_hours_per_day: 每日工作小时数（1-24）
         work_days_per_month: 每月工作天数（1-31）
-        num_workers: 工人数量（≥1）
+        num_workers: 已停用的兼容输入（忽略）
         critical_equipment: 关键设备配置（设备名 -> 数量）
         rest_time_threshold: 连续工作触发休息阈值（分钟）
         rest_duration_time: 时间触发休息时长（分钟）
         rest_load_threshold: 负荷触发休息阈值（REBA 1-10）
         rest_duration_load: 负荷触发休息时长（分钟）
-        target_output: 目标月产量（台）
+        target_output: 已停用的兼容输入（忽略）
     """
     
+    capacity_model: CapacityModel = Field(default_factory=CapacityModel)
+    evaluation: EvaluationSettings = Field(default_factory=EvaluationSettings)
+
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_obsolete_inputs(cls, value):
+        if isinstance(value, dict):
+            value = dict(value)
+            value.pop("num_workers", None)
+            value.pop("target_output", None)
+        return value
+
     # 排班配置
     work_hours_per_day: int = Field(
         default=8,
@@ -44,11 +57,7 @@ class GlobalConfig(BaseModel):
         le=31,
         description="每月工作天数"
     )
-    num_workers: int = Field(
-        default=6,
-        ge=1,
-        description="工人数量"
-    )
+    num_workers: int = Field(default=0, exclude=True, json_schema_extra={"deprecated": True}, description="已停用：人员按需供给")
     
     # 关键设备配置（前端自定义）
     critical_equipment: Dict[str, int] = Field(
@@ -88,11 +97,7 @@ class GlobalConfig(BaseModel):
     )
     
     # 生产目标
-    target_output: int = Field(
-        default=3,
-        ge=1,
-        description="目标月产量（台）"
-    )
+    target_output: int = Field(default=0, exclude=True, json_schema_extra={"deprecated": True}, description="已停用：按评估时长统计产出")
     
     # 高级配置
     pipeline_mode: bool = Field(
@@ -201,9 +206,6 @@ class GlobalConfig(BaseModel):
         if self.work_hours_per_day > 12:
             warnings.append(f"每日工作时间 {self.work_hours_per_day} 小时可能过长")
         
-        # 检查工人数量
-        if self.num_workers < 2:
-            warnings.append("工人数量过少，可能导致流水线效率低下")
         
         # 检查设备配置
         if not self.critical_equipment:
@@ -224,7 +226,6 @@ class GlobalConfig(BaseModel):
             "example": {
                 "work_hours_per_day": 8,
                 "work_days_per_month": 22,
-                "num_workers": 6,
                 "critical_equipment": {
                     "动平衡机": 2,
                     "试车台": 1,
@@ -235,6 +236,5 @@ class GlobalConfig(BaseModel):
                 "rest_duration_time": 5.0,
                 "rest_load_threshold": 7,
                 "rest_duration_load": 3.0,
-                "target_output": 3
             }
         }

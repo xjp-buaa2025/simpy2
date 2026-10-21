@@ -2,6 +2,11 @@
  * 画布模块 - 流程图编辑器
  */
 
+const PROCESS_CANVAS_FONT = '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif';
+const CANVAS_MIN_SCALE = 0.08;
+const CANVAS_MAX_SCALE = 3;
+let canvasPixelRatioQuery = null;
+
 // 初始化画布
 function initCanvas() {
     canvas = document.getElementById('processCanvas');
@@ -16,40 +21,139 @@ function initCanvas() {
     canvas.addEventListener('mouseup', handleCanvasMouseUp);
     canvas.addEventListener('dblclick', handleCanvasDblClick);
     canvas.addEventListener('contextmenu', handleCanvasContextMenu);
-    canvas.addEventListener('wheel', handleCanvasWheel);
+    canvas.addEventListener('wheel', handleCanvasWheel, { passive: false });
     canvas.addEventListener('dragover', e => e.preventDefault());
     canvas.addEventListener('drop', handleCanvasDrop);
     document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('mouseup',e=>{if(e.target!==canvas&&(isDragging||isConnecting||dragNode||dragStationContainer))handleCanvasMouseUp(e);});
+    if(typeof ResizeObserver!=='undefined')new ResizeObserver(resizeCanvas).observe(canvas.parentElement);
+    watchCanvasPixelRatio();
+}
+
+// All layout and pointer coordinates stay in CSS pixels; only the bitmap uses DPR.
+function getCanvasViewport() {
+    const rect = canvas.getBoundingClientRect();
+    return { width: rect.width, height: rect.height };
+}
+
+function getCanvasContentTop() {
+    const { height } = getCanvasViewport();
+    const toolbar = canvas.parentElement.querySelector('.canvas-toolbar');
+    return Math.min(height, toolbar ? toolbar.offsetTop + toolbar.offsetHeight + 16 : 0);
+}
+
+function getCanvasContentCenter() {
+    const { width, height } = getCanvasViewport();
+    const top = getCanvasContentTop();
+    return { x: width / 2, y: top + (height - top) / 2 };
+}
+
+function watchCanvasPixelRatio() {
+    if (!window.matchMedia) return;
+    if (canvasPixelRatioQuery) canvasPixelRatioQuery.removeEventListener('change', handleCanvasPixelRatioChange);
+    canvasPixelRatioQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    canvasPixelRatioQuery.addEventListener('change', handleCanvasPixelRatioChange);
+}
+
+function handleCanvasPixelRatioChange() {
+    resizeCanvas();
+    watchCanvasPixelRatio();
+}
+
+function updateCanvasZoomControls() {
+    const label = document.getElementById('canvasZoomLabel');
+    if (label) label.textContent = `${Math.round(scale * 100)}%`;
+    const zoomOut = document.getElementById('canvasZoomOut');
+    const zoomIn = document.getElementById('canvasZoomIn');
+    if (zoomOut) zoomOut.disabled = scale <= CANVAS_MIN_SCALE;
+    if (zoomIn) zoomIn.disabled = scale >= CANVAS_MAX_SCALE;
+}
+
+function setCanvasZoom(nextScale, anchor = getCanvasContentCenter()) {
+    const { width, height } = getCanvasViewport();
+    if (width <= 0 || height <= 0 || !Number.isFinite(nextScale)) return;
+    const next = Math.min(CANVAS_MAX_SCALE, Math.max(CANVAS_MIN_SCALE, nextScale));
+    canvasOffset.x = anchor.x - (anchor.x - canvasOffset.x) * next / scale;
+    canvasOffset.y = anchor.y - (anchor.y - canvasOffset.y) * next / scale;
+    scale = next;
+    renderCanvas();
+}
+
+function zoomCanvas(factor) {
+    setCanvasZoom(scale * factor);
+}
+
+function resetCanvasZoom() {
+    setCanvasZoom(1);
+}
+
+function isAreaVisible(aid) {return state.showStationContainers&&(!state.stationFilter||state.stationFilter===aid);}
+function isNodeVisible(node) {
+    if(state.stationFilter&&node.station!==state.stationFilter)return false;
+    return !(state.showStationContainers&&stationContainers[node.station]?.collapsed);
+}
+function cancelCanvasGesture(){isConnecting=false;connectStart=null;isDragging=false;dragNode=null;dragStationContainer=null;}
+function areaHeaderAction(pos,entry){
+    if(!entry)return '';
+    const c=entry.container,w=c.collapsed?200:c.width;
+    if(pos.y<c.y||pos.y>c.y+36)return '';
+    if(pos.x>=c.x+w-36&&pos.x<=c.x+w-8)return 'fold';
+    if(pos.x>=c.x+w-72&&pos.x<c.x+w-40)return 'properties';
+    return '';
+}
+function fitCanvas(){
+    const { width, height } = getCanvasViewport();
+    if (width <= 0 || height <= 0) return;
+    const boxes=[];
+    for(const [aid,c] of Object.entries(stationContainers))if(isAreaVisible(aid))boxes.push({x:c.x,y:c.y,w:c.collapsed?200:c.width,h:c.collapsed?80:c.height});
+    for(const n of state.nodes)if(isNodeVisible(n))boxes.push({x:n.x,y:n.y,w:120,h:50});
+    if(!boxes.length)return;
+    const left=Math.min(...boxes.map(b=>b.x)),top=Math.min(...boxes.map(b=>b.y)),right=Math.max(...boxes.map(b=>b.x+b.w)),bottom=Math.max(...boxes.map(b=>b.y+b.h));
+    const marginTop=getCanvasContentTop(),availableHeight=Math.max(1,height-marginTop-32);
+    scale=Math.min(2,Math.max(CANVAS_MIN_SCALE,Math.min(Math.max(1,width-64)/Math.max(1,right-left),availableHeight/Math.max(1,bottom-top))));
+    canvasOffset={x:(width-(right-left)*scale)/2-left*scale,y:marginTop+(availableHeight-(bottom-top)*scale)/2-top*scale};renderCanvas();
 }
 
 // 调整画布大小
 function resizeCanvas() {
-    const container = canvas.parentElement;
-    canvas.width = container.clientWidth;
-    canvas.height = container.clientHeight;
+    const { width, height } = getCanvasViewport();
+    if (width <= 0 || height <= 0) return;
+    const dpr = window.devicePixelRatio || 1;
+    const pixelWidth = Math.max(1, Math.round(width * dpr));
+    const pixelHeight = Math.max(1, Math.round(height * dpr));
+    if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+    if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
     renderCanvas();
 }
 
 // 切换布局模式
-function toggleLayoutMode() {
-    state.layoutMode = state.layoutMode === 'normal' ? 'station-only' : 'normal';
+function setCanvasLayoutMode(mode) {
+    state.layoutMode = mode;
     const button = document.getElementById('layoutModeToggle');
     if (state.layoutMode === 'station-only') {
         button.textContent = '📋 详细视图';
         button.classList.remove('btn-secondary');
         button.classList.add('btn-primary');
     } else {
-        button.textContent = '🏢 工位层级视图';
+        button.textContent = '🏢 工区层级视图';
         button.classList.remove('btn-primary');
         button.classList.add('btn-secondary');
     }
+}
+
+function toggleLayoutMode() {
+    setCanvasLayoutMode(state.layoutMode === 'normal' ? 'station-only' : 'normal');
     renderCanvas();
-    showToast(`已切换到${state.layoutMode === 'station-only' ? '工位层级' : '详细'}视图`, 'success');
+    showToast(`已切换到${state.layoutMode === 'station-only' ? '工区层级' : '详细'}视图`, 'success');
 }
 
 // 渲染画布
 function renderCanvas() {
+    const { width, height } = getCanvasViewport();
+    if (width <= 0 || height <= 0) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(canvas.width / width, 0, 0, canvas.height / height, 0, 0);
     ctx.save();
     ctx.translate(canvasOffset.x, canvasOffset.y);
     ctx.scale(scale, scale);
@@ -61,7 +165,7 @@ function renderCanvas() {
         drawStationContainers();
     }
     
-    // 在工位层级视图下，绘制工位之间的连线
+    // 在工区层级视图下，绘制工位之间的连线
     if (state.layoutMode === 'station-only') {
         drawStationEdges();
     } else {
@@ -69,7 +173,7 @@ function renderCanvas() {
         state.edges.forEach(edge => {
             const fromNode = state.nodes.find(n => n.id === edge.from);
             const toNode = state.nodes.find(n => n.id === edge.to);
-            if (fromNode && toNode) drawEdge(fromNode, toNode);
+            if (fromNode && toNode && isNodeVisible(fromNode) && isNodeVisible(toNode)) drawEdge(fromNode, toNode);
         });
     }
     
@@ -86,23 +190,10 @@ function renderCanvas() {
         ctx.setLineDash([]);
     }
     
-    // 绘制节点
-    state.nodes.forEach(node => {
-        // 在正常模式下，根据工位过滤
-        if (state.layoutMode === 'normal' && state.stationFilter && node.station !== state.stationFilter) {
-            return;
-        }
-        // 在工位层级视图下，只显示展开工位的节点
-        if (state.layoutMode === 'station-only') {
-            const container = stationContainers[node.station];
-            if (!container || container.collapsed) {
-                return;
-            }
-        }
-        drawNode(node, node === state.selectedNode);
-    });
+    state.nodes.forEach(node=>{if(isNodeVisible(node))drawNode(node,node===state.selectedNode);});
     
     ctx.restore();
+    updateCanvasZoomControls();
     updateStats();
 }
 
@@ -134,7 +225,7 @@ function drawStationEdges() {
         const fromContainer = stationContainers[conn.fromStation];
         const toContainer = stationContainers[conn.toStation];
         
-        if (fromContainer && toContainer) {
+        if (fromContainer && toContainer && isAreaVisible(conn.fromStation) && isAreaVisible(conn.toStation)) {
             // 无论工位是否展开，都绘制连线
             const fromX = fromContainer.x + (fromContainer.collapsed ? 200 : fromContainer.width);
             const fromY = fromContainer.y + (fromContainer.collapsed ? 40 : fromContainer.height / 2);
@@ -164,63 +255,55 @@ function drawStationEdges() {
 
 // 绘制工位容器
 function drawStationContainers() {
+    const stale=typeof isCapacityStale==='function'&&isCapacityStale();
     Object.entries(stationContainers).forEach(([stationId, container]) => {
         const { x, y, width, height, color, name } = container;
         const isCollapsed = container.collapsed;
         
-        // 在工位层级视图下，始终绘制工位容器（包括折叠状态）
-        if (state.layoutMode === 'normal' && isCollapsed) return;
+        // 在工区层级视图下，始终绘制工位容器（包括折叠状态）
+        if (!isAreaVisible(stationId)) return;
         
         // 容器背景
-        ctx.fillStyle = hexToRgba(color, isCollapsed ? 0.2 : 0.1);
+        ctx.fillStyle = hexToRgba(color, isCollapsed ? 0.1 : 0.045);
         ctx.beginPath();
         ctx.roundRect(x, y, isCollapsed ? 200 : width, isCollapsed ? 80 : height, 12);
         ctx.fill();
         
         // 容器边框
         ctx.strokeStyle = hexToRgba(color, isCollapsed ? 0.8 : 0.5);
-        ctx.lineWidth = isCollapsed ? 3 : 2;
+        ctx.lineWidth = state.selectedArea===stationId ? 4 : isCollapsed ? 3 : 2;
+        if(state.selectedArea===stationId)ctx.strokeStyle=color;
         ctx.stroke();
         
         // 标题栏背景
-        ctx.fillStyle = hexToRgba(color, 0.3);
+        ctx.fillStyle = hexToRgba(color, 0.09);
         ctx.beginPath();
         ctx.roundRect(x, y, isCollapsed ? 200 : width, 36, [12, 12, 0, 0]);
         ctx.fill();
         
-        // 标题文字
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 14px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText(`📍 ${name}`, x + 12, y + 24);
-        
-        // 节点数量
-        const nodeCount = state.nodes.filter(n => n.station === stationId).length;
-        ctx.font = '12px sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillStyle = hexToRgba('#fff', 0.7);
-        ctx.fillText(`${nodeCount} 节点`, x + (isCollapsed ? 200 : width) - 12, y + 24);
-        
-        // 折叠状态的展开提示
-        if (isCollapsed) {
-            ctx.font = '16px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillStyle = hexToRgba(color, 0.8);
-            ctx.fillText('▶️ 点击展开', x + 100, y + 55);
-        }
+        const w=isCollapsed?200:width;
+        ctx.fillStyle='#253b56';ctx.font=`bold 14px ${PROCESS_CANVAS_FONT}`;ctx.textAlign='left';
+        let title=name;while(title.length>1&&ctx.measureText(title).width>w-100)title=title.slice(0,-1);
+        if(title!==name)title+='…';ctx.fillText(title,x+12,y+24);
+        ctx.font=`16px ${PROCESS_CANVAS_FONT}`;ctx.textAlign='center';ctx.fillText('ⓘ',x+w-56,y+24);ctx.fillText(isCollapsed?'▸':'▾',x+w-22,y+24);
+        const count=state.nodes.filter(n=>n.station===stationId).length;
+        ctx.font=`11px ${PROCESS_CANVAS_FONT}`;ctx.textAlign='left';ctx.fillStyle=stale?'#946420':'#52677f';
+        ctx.fillText(`${count} 道工序 · ${stale?'待重新仿真':'右键查看属性'}`,x+12,y+55);
+
     });
 }
 
 // 绘制网格
 function drawGrid() {
+    const { width, height } = getCanvasViewport();
     const gridSize = 20;
-    ctx.strokeStyle = '#1f2937';
+    ctx.strokeStyle = '#e8edf4';
     ctx.lineWidth = 0.5;
     
     const startX = -canvasOffset.x / scale;
     const startY = -canvasOffset.y / scale;
-    const endX = (canvas.width - canvasOffset.x) / scale;
-    const endY = (canvas.height - canvasOffset.y) / scale;
+    const endX = (width - canvasOffset.x) / scale;
+    const endY = (height - canvasOffset.y) / scale;
     
     for (let x = Math.floor(startX / gridSize) * gridSize; x < endX; x += gridSize) {
         ctx.beginPath();
@@ -243,36 +326,47 @@ function drawNode(node, selected) {
     const y = node.y;
     const width = 120;
     const height = 50;
+    const typeColor = typeof OP_TYPE_COLORS === 'undefined' ? '#64748b' : OP_TYPE_COLORS[node.opType] || '#64748b';
     
     // 阴影
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(48, 73, 106, 0.06)';
+    ctx.shadowBlur = 4;
     ctx.shadowOffsetX = 2;
     ctx.shadowOffsetY = 2;
     
     // 节点背景
-    ctx.fillStyle = OP_TYPE_COLORS[node.opType] || '#6b7280';
+    ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.roundRect(x, y, width, height, 8);
     ctx.fill();
     
     ctx.shadowColor = 'transparent';
+    ctx.fillStyle = hexToRgba(typeColor, 0.12);
+    ctx.fill();
     
+    ctx.strokeStyle=typeColor;ctx.lineWidth=1.5;ctx.stroke();
     // 选中边框
     if (selected) {
-        ctx.strokeStyle = '#fff';
+        ctx.strokeStyle = '#367bea';
         ctx.lineWidth = 3;
         ctx.stroke();
     }
     
     // 节点文字
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 14px sans-serif';
+    ctx.fillStyle = '#253b56';
+    ctx.font = `bold 14px ${PROCESS_CANVAS_FONT}`;
     ctx.textAlign = 'center';
-    ctx.fillText(`${OP_TYPE_ICONS[node.opType]} ${node.stepId}`, x + width/2, y + 20);
+    const heading = `${node.opType} · ${node.stepId}`;
+    if (ctx.measureText(heading).width > width - 12) ctx.font = `bold 11px ${PROCESS_CANVAS_FONT}`;
+    ctx.fillText(heading, x + width/2, y + 20);
     
-    ctx.font = '11px sans-serif';
-    const displayName = node.taskName.length > 10 ? node.taskName.substring(0, 10) + '...' : node.taskName;
+    ctx.font = `12px ${PROCESS_CANVAS_FONT}`;
+    ctx.fillStyle = '#334155';
+    let displayName = node.taskName;
+    if (ctx.measureText(displayName).width > width - 16) {
+        while (displayName.length && ctx.measureText(displayName + '…').width > width - 16) displayName = displayName.slice(0, -1);
+        displayName += '…';
+    }
     ctx.fillText(displayName, x + width/2, y + 38);
 }
 
@@ -341,6 +435,7 @@ function getMousePos(e) {
 function findNodeAt(pos) {
     for (let i = state.nodes.length - 1; i >= 0; i--) {
         const n = state.nodes[i];
+        if (!isNodeVisible(n)) continue;
         if (pos.x >= n.x && pos.x <= n.x + 120 && pos.y >= n.y && pos.y <= n.y + 50) {
             return n;
         }
@@ -350,9 +445,9 @@ function findNodeAt(pos) {
 
 // 查找鼠标位置的工位容器
 function findStationContainerAt(pos) {
-    for (const [stationId, container] of Object.entries(stationContainers)) {
-        // 在工位层级视图下，即使容器折叠也要检查点击
-        if (state.layoutMode === 'normal' && container.collapsed) continue;
+    for (const [stationId, container] of Object.entries(stationContainers).reverse()) {
+        // 在工区层级视图下，即使容器折叠也要检查点击
+        if (!isAreaVisible(stationId)) continue;
         
         const width = container.collapsed ? 200 : container.width;
         const height = container.collapsed ? 80 : container.height;
@@ -367,11 +462,16 @@ function findStationContainerAt(pos) {
 
 // 鼠标按下事件
 function handleCanvasMouseDown(e) {
+    if(typeof workbenchBusy!=='undefined'&&workbenchBusy)return;
+    if(typeof canvasPress!=='undefined')canvasPress={x:e.clientX,y:e.clientY};
+    if(e.button!==0){cancelCanvasGesture();return;}
     const pos = getMousePos(e);
     const node = findNodeAt(pos);
     const stationContainer = findStationContainerAt(pos);
+    const action=areaHeaderAction(pos,stationContainer);
+    if(action){cancelCanvasGesture();if(action==='fold')toggleStationContainer(stationContainer.stationId);else openAreaInspector(stationContainer.stationId);return;}
     
-    if (e.shiftKey && node) {
+    if ((e.shiftKey || (typeof canvasLinkTool!=='undefined'&&canvasLinkTool)) && node) {
         isConnecting = true;
         connectStart = node;
         return;
@@ -383,6 +483,7 @@ function handleCanvasMouseDown(e) {
         dragOffset = { x: pos.x - node.x, y: pos.y - node.y };
     } else if (stationContainer) {
         state.selectedNode = null;
+        state.selectedArea = stationContainer.stationId;
         
         // 无论在什么模式下，都允许拖动工位容器
         dragStationContainer = stationContainer;
@@ -427,13 +528,14 @@ function toggleStationContainer(stationId) {
         }
         
         renderCanvas();
-        showToast(`${container.collapsed ? '已折叠' : '已展开'}工位: ${container.name}`, 'success');
+        showToast(`${container.collapsed ? '已折叠' : '已展开'}工区: ${container.name}`, 'success');
     }
 }
 
 // 鼠标移动事件
 function handleCanvasMouseMove(e) {
     lastMouseEvent = e;
+    if(typeof canvasPress!=='undefined'&&canvasPress&&(dragNode||dragStationContainer)&&Math.hypot(e.clientX-canvasPress.x,e.clientY-canvasPress.y)<4)return;
     
     if (dragNode) {
         const pos = getMousePos(e);
@@ -474,6 +576,9 @@ function handleCanvasMouseMove(e) {
 
 // 鼠标释放事件
 function handleCanvasMouseUp(e) {
+    if(e.button!==0){cancelCanvasGesture();renderCanvas();return;}
+    const clickedNode=dragNode;
+    const simpleClick=typeof canvasPress!=='undefined'&&canvasPress&&Math.hypot(e.clientX-canvasPress.x,e.clientY-canvasPress.y)<4;
     if (isConnecting && connectStart) {
         const pos = getMousePos(e);
         const targetNode = findNodeAt(pos);
@@ -495,14 +600,18 @@ function handleCanvasMouseUp(e) {
     dragNode = null;
     dragStationContainer = null;
     renderCanvas();
+    if(simpleClick&&clickedNode)openNodeModal(clickedNode);
+    if(typeof canvasPress!=='undefined')canvasPress=null;
 }
 
 // 双击事件
 function handleCanvasDblClick(e) {
+    if(e.button!==0)return;
     const pos = getMousePos(e);
     const node = findNodeAt(pos);
     const stationContainer = findStationContainerAt(pos);
     
+    if(areaHeaderAction(pos,stationContainer))return;
     if (node) {
         openNodeModal(node);
     } else if (stationContainer) {
@@ -513,7 +622,7 @@ function handleCanvasDblClick(e) {
             if (e.ctrlKey || state.layoutMode === 'normal') {
                 editStationName(stationContainer.stationId, stationContainer.container);
             } else {
-                // 在工位层级视图下，双击标题栏展开/收起工位
+                // 在工区层级视图下，双击标题栏展开/收起工位
                 toggleStationContainer(stationContainer.stationId);
             }
         } else {
@@ -526,94 +635,28 @@ function handleCanvasDblClick(e) {
 }
 
 // 右键菜单
-function handleCanvasContextMenu(e) { 
-    e.preventDefault(); 
+function handleCanvasContextMenu(e) {
+    e.preventDefault();cancelCanvasGesture();
+    const pos=getMousePos(e),node=findNodeAt(pos),container=findStationContainerAt(pos);
+    const aid=node?.station||container?.stationId;
+    if(aid)openAreaInspector(aid);
 }
 
-// 编辑工位名称
-function editStationName(stationId, container) {
-    // 创建临时输入框元素
-    const input = document.createElement('input');
-    const station = state.stations.find(s => s.id === stationId);
-    
-    if (!station) return;
-    
-    input.type = 'text';
-    input.value = station.name;
-    input.style.position = 'absolute';
-    input.style.zIndex = 1000;
-    input.style.backgroundColor = 'white';
-    input.style.border = '2px solid #3b82f6';
-    input.style.borderRadius = '4px';
-    input.style.padding = '8px';
-    input.style.fontSize = '14px';
-    input.style.fontWeight = 'bold';
-    input.style.color = '#374151';
-    
-    // 计算输入框位置（基于容器标题栏位置）
-    const rect = canvas.getBoundingClientRect();
-    const canvasScale = scale;
-    const inputLeft = rect.left + (container.x + 12) * canvasScale + canvasOffset.x * canvasScale;
-    const inputTop = rect.top + (container.y + 8) * canvasScale + canvasOffset.y * canvasScale;
-    const inputWidth = (container.width - 24) * canvasScale;
-    
-    input.style.left = inputLeft + 'px';
-    input.style.top = inputTop + 'px';
-    input.style.width = inputWidth + 'px';
-    
-    // 添加到页面
-    document.body.appendChild(input);
-    
-    // 自动聚焦并全选
-    input.focus();
-    input.select();
-    
-    // 处理确认修改
-    function handleConfirm() {
-        const newName = input.value.trim();
-        if (newName && newName !== station.name) {
-            // 更新工位名称
-            station.name = newName;
-            container.name = newName;
-            
-            // 更新所有相关显示
-            renderCanvas();
-            showToast(`工位名称已更新为: ${newName}`, 'success');
-        }
-        
-        // 清理输入框
-        document.body.removeChild(input);
-    }
-    
-    // 处理取消修改
-    function handleCancel() {
-        document.body.removeChild(input);
-    }
-    
-    // 事件绑定
-    input.addEventListener('blur', handleConfirm);
-    input.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            handleConfirm();
-        }
-    });
-    input.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            handleCancel();
-        }
-    });
-}
+// All name edits share the inspector save path and update every displayed name.
+function editStationName(stationId){openAreaInspector(stationId);document.getElementById('areaName')?.focus();}
 
 // 滚轮缩放
 function handleCanvasWheel(e) {
     e.preventDefault();
+    if (!e.deltaY) return;
+    const rect = canvas.getBoundingClientRect();
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    scale = Math.min(Math.max(scale * delta, 0.3), 3);
-    renderCanvas();
+    setCanvasZoom(scale * delta, { x: e.clientX - rect.left, y: e.clientY - rect.top });
 }
 
 // 拖放事件
 function handleCanvasDrop(e) {
+    if(typeof workbenchBusy!=='undefined'&&workbenchBusy)return;
     e.preventDefault();
     const opType = e.dataTransfer.getData('opType');
     if (!opType) return;
@@ -645,6 +688,9 @@ function handleCanvasDrop(e) {
 
 // 键盘事件
 function handleKeyDown(e) {
+    if(typeof workbenchBusy!=='undefined'&&workbenchBusy)return;
+    if(e.target?.closest?.('input,textarea,select,[contenteditable=true]')||document.querySelector('.modal-overlay.active'))return;
+    if(e.key==='Escape'){cancelCanvasGesture();if(typeof closeAreaInspector==='function')closeAreaInspector();return;}
     if (e.key === 'Delete' && state.selectedNode) {
         deleteSelectedNode();
     }

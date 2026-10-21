@@ -10,7 +10,8 @@ function initTabs() {
 }
 
 // 切换Tab
-function switchTab(tabId) {
+function switchTab(tabId, force = false) {
+    if(!force&&tabId!=='editor'&&typeof guardAreaTransition==='function'){guardAreaTransition(()=>switchTab(tabId,true));return;}
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     
@@ -40,17 +41,70 @@ function switchTab(tabId) {
 
 // 初始化工具箱（拖拽）
 function initToolbox() {
+    loadBehaviorColors();
+    const toolbox = document.getElementById('behaviorToolbox');
+    toolbox.innerHTML = BEHAVIOR_UNITS.map(unit => `
+        <div class="toolbox-item" draggable="true" data-type="${unit.type}">
+            <div class="toolbox-icon" aria-hidden="true"></div>
+            <div class="toolbox-info"><h4>${unit.name}</h4><span>${unit.type} · ${unit.english}</span></div>
+            <input class="behavior-color" type="color" data-behavior-color="${unit.type}" aria-label="${unit.name}配色" title="${unit.name}配色：同步所有 ${unit.type} 节点">
+        </div>`).join('');
+    document.getElementById('nodeOpType').innerHTML = BEHAVIOR_UNITS.map(unit => `<option value="${unit.type}">${unit.type} - ${unit.name}</option>`).join('');
     document.querySelectorAll('.toolbox-item').forEach(item => {
         item.addEventListener('dragstart', e => {
+            if (e.target.closest('input')) { e.preventDefault(); return; }
             e.dataTransfer.setData('opType', item.dataset.type);
         });
     });
+    toolbox.querySelectorAll('[data-behavior-color]').forEach(input => {
+        input.addEventListener('input', () => setBehaviorColor(input.dataset.behaviorColor, input.value));
+        input.addEventListener('mousedown', e => e.stopPropagation());
+        input.addEventListener('dragstart', e => { e.preventDefault(); e.stopPropagation(); });
+    });
+    updateBehaviorPalette();
+}
+
+function loadBehaviorColors() {
+    Object.assign(OP_TYPE_COLORS, DEFAULT_OP_TYPE_COLORS);
+    try {
+        const saved = JSON.parse(localStorage.getItem('assembly.ui.behaviorColors') || '{}');
+        if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return;
+        for (const unit of BEHAVIOR_UNITS) {
+            if (/^#[0-9a-f]{6}$/i.test(saved[unit.type])) OP_TYPE_COLORS[unit.type] = saved[unit.type];
+        }
+    } catch {}
+}
+
+function updateBehaviorPalette() {
+    document.querySelectorAll('.toolbox-item').forEach(item => {
+        const color = OP_TYPE_COLORS[item.dataset.type];
+        item.style.setProperty('--behavior-color', color);
+        item.style.setProperty('--behavior-tint', hexToRgba(color, 0.12));
+        const input = item.querySelector('[data-behavior-color]');
+        if (input) input.value = color;
+    });
+}
+
+function setBehaviorColor(type, color) {
+    if (!Object.hasOwn(DEFAULT_OP_TYPE_COLORS, type) || !/^#[0-9a-f]{6}$/i.test(color)) return;
+    OP_TYPE_COLORS[type] = color;
+    try { localStorage.setItem('assembly.ui.behaviorColors', JSON.stringify(OP_TYPE_COLORS)); } catch {}
+    updateBehaviorPalette();
+    renderCanvas();
+}
+
+function resetBehaviorColors() {
+    Object.assign(OP_TYPE_COLORS, DEFAULT_OP_TYPE_COLORS);
+    try { localStorage.removeItem('assembly.ui.behaviorColors'); } catch {}
+    updateBehaviorPalette();
+    renderCanvas();
 }
 
 // 更新统计信息
 function updateStats() {
     document.getElementById('nodeCount').textContent = state.nodes.length;
     document.getElementById('edgeCount').textContent = state.edges.length;
+    if(typeof refreshCapacityEditStatus==='function')refreshCapacityEditStatus();
 }
 
 // 显示/隐藏加载状态
@@ -111,17 +165,4 @@ function removeEquipment(name) {
 }
 
 // 入场动画初始化：为卡片与通用容器添加淡入与上浮效果
-function initAnimations() {
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                entry.target.classList.add('animate-visible');
-            }
-        });
-    }, { threshold: 0.1 });
-    
-    document.querySelectorAll('.kpi-card, .card').forEach(el => {
-        el.classList.add('animate-initial');
-        observer.observe(el);
-    });
-}
+function initAnimations() { /* No hidden cards or entrance transforms in the workbench. */ }

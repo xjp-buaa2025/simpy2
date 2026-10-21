@@ -8,8 +8,6 @@
 scheduling:
   work_hours_per_day: 8        # 每日工作小时数 (1-24)
   work_days_per_month: 22      # 每月工作天数 (1-31)
-  num_workers: 6               # 工人数量
-  target_output: 3             # 目标月产量（台）
 
 # 关键设备配置
 # 关键设备数量有限，需要排队等待

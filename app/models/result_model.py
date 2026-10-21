@@ -208,7 +208,7 @@ class SimulationResult:
     config: Optional[GlobalConfig] = None
     sim_duration: float = 0
     engines_completed: int = 0
-    target_achievement_rate: float = 0
+    target_achievement_rate: Optional[float] = None
     avg_cycle_time: float = 0
     worker_stats: List[ResourceUtilization] = field(default_factory=list)
     equipment_stats: List[ResourceUtilization] = field(default_factory=list)
@@ -219,13 +219,17 @@ class SimulationResult:
     created_at: str = ""
     completed_at: str = ""
     no_rest_comparison: Optional[Dict[str, Any]] = None
+    area_stats: List[Dict[str, Any]] = field(default_factory=list)
+    area_completion_events: List[Dict[str, Any]] = field(default_factory=list)
+    engine_completion_events: List[Dict[str, Any]] = field(default_factory=list)
+    task_completion_events: List[Dict[str, Any]] = field(default_factory=list)
+    station_progress: Optional[Dict[str, Any]] = None
+    resource_snapshot: Dict[str, Any] = field(default_factory=dict)
+    evaluation_context: Dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
-        """计算达成率"""
-        if self.config and self.target_achievement_rate == 0:
-            if self.config.target_output > 0:
-                self.target_achievement_rate = self.engines_completed / self.config.target_output
-    
+        self.target_achievement_rate = None
+
     @property
     def sim_duration_hours(self) -> float:
         """仿真时长（小时）"""
@@ -237,9 +241,9 @@ class SimulationResult:
         return self.avg_cycle_time / 60
     
     @property
-    def target_achievement_percent(self) -> float:
+    def target_achievement_percent(self) -> Optional[float]:
         """达成率百分比"""
-        return self.target_achievement_rate * 100
+        return None
     
     @property
     def avg_worker_utilization(self) -> float:
@@ -292,7 +296,14 @@ class SimulationResult:
             "time_mapping": self.time_mapping,
             "created_at": self.created_at,
             "completed_at": self.completed_at,
-            "no_rest_comparison": self.no_rest_comparison
+            "no_rest_comparison": self.no_rest_comparison,
+            "area_stats": self.area_stats,
+            "area_completion_events": self.area_completion_events,
+            "engine_completion_events": self.engine_completion_events,
+            "task_completion_events": self.task_completion_events,
+            "station_progress": self.station_progress,
+            "resource_snapshot": self.resource_snapshot,
+            "evaluation_context": self.evaluation_context
         }
     
     def get_kpi_summary(self) -> dict:
@@ -300,8 +311,8 @@ class SimulationResult:
         return {
             "production": {
                 "engines_completed": self.engines_completed,
-                "target_output": self.config.target_output if self.config else 0,
-                "achievement_rate": f"{self.target_achievement_percent:.1f}%"
+                "target_output": None,
+                "achievement_rate": None
             },
             "time": {
                 "total_sim_time_hours": self.sim_duration_hours,
@@ -345,7 +356,7 @@ class SimulationResultModel(BaseModel):
     status: str = Field(description="仿真状态")
     sim_duration: float = Field(description="仿真时长")
     engines_completed: int = Field(description="完成发动机数")
-    target_achievement_rate: float = Field(description="计划达成率")
+    target_achievement_rate: Optional[float] = Field(default=None,description="计划达成率")
     avg_cycle_time: float = Field(description="平均周期时间")
     worker_stats: List[ResourceUtilizationModel] = Field(default=[], description="工人统计")
     equipment_stats: List[ResourceUtilizationModel] = Field(default=[], description="设备统计")

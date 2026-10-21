@@ -137,8 +137,6 @@ def validate_config(config: GlobalConfig) -> Tuple[bool, List[str]]:
     if config.work_days_per_month < 1 or config.work_days_per_month > 31:
         errors.append("每月工作天数必须在1-31之间")
     
-    if config.num_workers < 1:
-        errors.append("工人数量必须大于0")
     
     # 设备配置
     if not config.critical_equipment:
@@ -149,8 +147,8 @@ def validate_config(config: GlobalConfig) -> Tuple[bool, List[str]]:
                 errors.append(f"设备'{name}'的容量必须大于0")
     
     # 休息参数
-    if config.rest_time_threshold <= 0:
-        errors.append("休息时间阈值必须大于0")
+    if config.rest_time_threshold < 0:
+        errors.append("休息时间阈值不能为负")
     
     if config.rest_duration_time < 0:
         errors.append("休息时长不能为负")
@@ -159,8 +157,6 @@ def validate_config(config: GlobalConfig) -> Tuple[bool, List[str]]:
         errors.append("负荷休息阈值必须在1-10之间")
     
     # 生产目标
-    if config.target_output < 1:
-        errors.append("目标产量必须大于0")
     
     is_valid = len(errors) == 0
     return is_valid, errors
@@ -198,8 +194,11 @@ def validate_csv_row(
     
     # 操作类型
     op_type = row.get('op_type', '').strip().upper()
-    if op_type and op_type not in ['H', 'A', 'M', 'T', 'D']:
-        warnings.append(f"第{row_num}行: 未知操作类型 '{op_type}'")
+    if op_type:
+        try:
+            OpType(op_type)
+        except ValueError:
+            warnings.append(f"第{row_num}行: 未知操作类型 '{op_type}'")
     
     # 数值字段
     try:
@@ -302,17 +301,6 @@ def validate_simulation_request(
         set(config.critical_equipment.keys())
     )
     all_warnings.extend(dep_warnings)
-    
-    # 检查工人数量是否足够
-    max_workers_needed = max(
-        (n.required_workers for n in process.nodes),
-        default=1
-    )
-    if max_workers_needed > config.num_workers:
-        all_errors.append(
-            f"工人数量({config.num_workers})不足以执行"
-            f"需要{max_workers_needed}人的任务"
-        )
     
     is_valid = len(all_errors) == 0
     return is_valid, all_errors, all_warnings

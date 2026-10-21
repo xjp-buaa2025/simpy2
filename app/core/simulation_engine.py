@@ -17,8 +17,12 @@ SimPy离散事件仿真的核心控制器
 from typing import Dict, List, Set, Any, Generator, Optional
 from datetime import datetime
 import uuid
+import random
 import simpy
 import numpy as np
+from app.core.run_progress import attach_progress_observer
+from app.core.production_policy import validate_production_process, release_interval, labor_summary
+from app.core.station_progress import build_station_progress
 
 from app.models.config_model import GlobalConfig
 from app.models.process_model import ProcessDefinition
@@ -60,8 +64,11 @@ class SimulationEngine:
         self.sim_id = str(uuid.uuid4())
         
         # 设置随机种子（用于复现）
+        # 注意：工时抽样用 np.random，返工判定用内置 random，二者都要播种，
+        # 否则即便设了种子，返工结果仍不可复现。
         if config.random_seed is not None:
             np.random.seed(config.random_seed)
+            random.seed(config.random_seed)
         
         # 仿真组件（在run时初始化）
         self.env: Optional[simpy.Environment] = None
@@ -74,6 +81,7 @@ class SimulationEngine:
         self.engines_completed = 0
         self.engine_start_times: Dict[int, float] = {}
         self.engine_end_times: Dict[int, float] = {}
+        self.executors = []
     
     def run(self) -> SimulationResult:
         """
@@ -82,6 +90,9 @@ class SimulationEngine:
         Returns:
             仿真结果
         """
+        if not self.process.nodes:
+            return self._create_failed_result("工艺流程不能为空")
+        validate_production_process(self.process)
         # 初始化SimPy环境
         self.env = simpy.Environment()
         
@@ -108,7 +119,10 @@ class SimulationEngine:
             self.env.process(self._single_engine_process(1))
         
         # 运行仿真
+        attach_progress_observer(self)
         self.env.run(until=self.config.sim_time_minutes)
+        for executor in self.executors:
+            executor.flush()
         
         # 收集结果
         return self._collect_results()
@@ -145,119 +159,48 @@ class SimulationEngine:
                 if node.station not in node.required_tools:
                     node.required_tools.append(node.station)
 
-    def _pipeline_controller(self) -> Generator:
-        """
-        流水线控制器
-        
-        当资源允许时启动新发动机生产
-        """
-        engine_id = 0
-        max_engines = self.config.target_output + 2  # 多尝试几台
-        
-        # 获取第一个任务所需的最小工人数
+    def _pipeline_controller(self):
         start_nodes = self.scheduler.get_start_nodes()
         if not start_nodes:
             return
-        
-        first_node = self.scheduler.get_node(start_nodes[0])
-        min_workers_needed = first_node.required_workers if first_node else 1
-        
-        # 获取第一个任务的大致时长
-        first_task_duration = first_node.std_duration if first_node else 30
-        
-        while engine_id < max_engines and self.env.now < self.config.sim_time_minutes:
-            # 检查资源是否足够启动新发动机
-            available_workers = self.worker_pool.get_available_count()
-            
-            if available_workers >= min_workers_needed:
-                engine_id += 1
-                self.engine_start_times[engine_id] = self.env.now
-                
-                # 启动新发动机生产进程
-                self.env.process(self._engine_process(engine_id))
-                
-                # 间隔启动（等待第一个任务完成一半）
-                yield self.env.timeout(first_task_duration * 0.5)
-            else:
-                # 等待资源
-                yield self.env.timeout(10)
-    
-    def _single_engine_process(self, start_engine_id: int) -> Generator:
-        """
-        单台发动机模式（串行生产）
-        
-        一台接一台地生产，直到达到目标产量或时间耗尽
-        
-        Args:
-            start_engine_id: 起始发动机编号
-        """
-        engine_id = start_engine_id
-        max_engines = self.config.target_output + 1  # 目标产量
-        
-        while engine_id <= max_engines and self.env.now < self.config.sim_time_minutes:
-            self.engine_start_times[engine_id] = self.env.now
-            
-            # 等待当前发动机完全生产结束
-            yield from self._engine_process(engine_id)
-            
-            # 准备下一台
-            engine_id += 1
-    
-    def _engine_process(self, engine_id: int) -> Generator:
-        """
-        单台发动机的完整生产流程
-        
-        使用DAG调度，支持并行任务执行
-        
-        Args:
-            engine_id: 发动机编号
-        """
-        completed: Set[str] = set()
-        running: Set[str] = set()
-        total_tasks = self.scheduler.get_node_count()
-        
-        # 创建任务执行器
-        executor = TaskExecutor(
-            self.env,
-            self.config,
-            self.worker_pool,
-            self.equipment_mgr,
-            self.event_collector
-        )
-        
-        # 任务完成回调
-        def on_task_complete(step_id: str):
-            running.discard(step_id)
+        first = self.scheduler.get_node(start_nodes[0])
+        interval = release_interval(self.process, first)
+        eid = 0
+        while self.env.now < self.config.sim_time_minutes:
+            eid += 1
+            self.engine_start_times[eid] = self.env.now
+            self.env.process(self._engine_process(eid))
+            yield self.env.timeout(interval)
+
+    def _single_engine_process(self, start_engine_id):
+        eid = start_engine_id
+        while self.env.now < self.config.sim_time_minutes:
+            self.engine_start_times[eid] = self.env.now
+            yield from self._engine_process(eid)
+            eid += 1
+
+    def _engine_process(self, engine_id):
+        completed, running = set(), set()
+        signal = self.env.event()
+        executor = TaskExecutor(self.env, self.config, self.worker_pool, self.equipment_mgr, self.event_collector)
+        self.executors.append(executor)
+
+        def on_task_complete(step_id):
+            nonlocal signal
             completed.add(step_id)
-        
-        while len(completed) < total_tasks:
-            # 检查时间限制
-            if self.env.now >= self.config.sim_time_minutes:
-                break
-            
-            # 获取就绪任务（支持并行）
-            ready_tasks = self.scheduler.get_ready_nodes(completed)
-            ready_tasks = [t for t in ready_tasks if t not in running]
-            
-            # 启动所有就绪任务
-            for step_id in ready_tasks:
-                node = self.scheduler.get_node(step_id)
-                if node:
-                    running.add(step_id)
-                    self.env.process(
-                        self._execute_and_complete(
-                            engine_id, node, executor, on_task_complete
-                        )
-                    )
-            
-            # 短暂等待，避免忙循环
-            yield self.env.timeout(0.1)
-        
-        # 记录完成时间
-        if len(completed) == total_tasks:
-            self.engine_end_times[engine_id] = self.env.now
-            self.engines_completed += 1
-    
+            old, signal = signal, self.env.event()
+            if not old.triggered:
+                old.succeed()
+
+        while len(completed) < self.scheduler.get_node_count():
+            for sid in self.scheduler.get_ready_nodes(completed):
+                if sid not in running:
+                    running.add(sid)
+                    self.env.process(self._execute_and_complete(engine_id, self.scheduler.get_node(sid), executor, on_task_complete))
+            yield signal
+        self.engine_end_times[engine_id] = self.env.now
+        self.engines_completed += 1
+
     def _execute_and_complete(
         self,
         engine_id: int,
@@ -299,12 +242,6 @@ class SimulationEngine:
         
         avg_cycle_time = (
             sum(cycle_times) / len(cycle_times) if cycle_times else 0
-        )
-        
-        # 计划达成率
-        target_achievement_rate = (
-            self.engines_completed / self.config.target_output
-            if self.config.target_output > 0 else 0
         )
         
         # 工人统计（包含人因数据）
@@ -380,7 +317,7 @@ class SimulationEngine:
             config=self.config,
             sim_duration=sim_duration,
             engines_completed=self.engines_completed,
-            target_achievement_rate=target_achievement_rate,
+            target_achievement_rate=None,
             avg_cycle_time=avg_cycle_time,
             worker_stats=worker_stats,
             equipment_stats=equipment_stats,
@@ -389,6 +326,14 @@ class SimulationEngine:
             gantt_events=self.event_collector.get_all_events(),
             time_mapping=time_mapping,
             created_at=datetime.now().isoformat(),
+            engine_completion_events=[dict(engine_id=eid, end_time=t) for eid,t in sorted(self.engine_end_times.items())],
+            task_completion_events=self.event_collector.task_completion_events,
+            station_progress=build_station_progress(sim_id=self.sim_id, config=self.config,
+                process=self.process, gantt_events=self.event_collector.get_all_events(),
+                task_completion_events=self.event_collector.task_completion_events,
+                engine_release_times=self.engine_start_times, time_minutes=sim_duration),
+            evaluation_context={**labor_summary(self.event_collector.get_all_events()), "horizon_minutes": sim_duration, "mode": "plan", "initial_state": "empty",
+                                "random_seed": self.config.random_seed, "released_units": len(self.engine_start_times)},
             completed_at=datetime.now().isoformat()
         )
     
@@ -408,7 +353,7 @@ class SimulationEngine:
             config=self.config,
             sim_duration=0,
             engines_completed=0,
-            target_achievement_rate=0,
+            target_achievement_rate=None,
             avg_cycle_time=0,
             quality_stats=QualityStats(),
             human_factors_stats=HumanFactorsStats(),
@@ -432,8 +377,6 @@ class SimulationEngineNoRest:
         self.config = GlobalConfig(
             work_hours_per_day=config.work_hours_per_day,
             work_days_per_month=config.work_days_per_month,
-            num_workers=config.num_workers,
-            target_output=config.target_output,
             critical_equipment=config.critical_equipment,
             rest_time_threshold=999999,  # 禁用时间触发休息（极大阈值）
             rest_duration_time=0,  # 休息时长为0
@@ -455,6 +398,7 @@ class SimulationEngineNoRest:
         self.engines_completed = 0
         self.engine_start_times: Dict[int, float] = {}
         self.engine_end_times: Dict[int, float] = {}
+        self.executors = []
     
     def run(self) -> Dict[str, Any]:
         """
@@ -463,8 +407,10 @@ class SimulationEngineNoRest:
         Returns:
             简化的结果字典（用于对比）
         """
+        validate_production_process(self.process)
         if self.config.random_seed is not None:
             np.random.seed(self.config.random_seed + 1000)  # 使用不同种子
+            random.seed(self.config.random_seed + 1000)     # 返工判定同样需播种
         
         self.env = simpy.Environment()
         self.worker_pool = WorkerPool(self.env, self.config)
@@ -485,7 +431,10 @@ class SimulationEngineNoRest:
         else:
             self.env.process(self._single_engine_process(1))
         
+        attach_progress_observer(self)
         self.env.run(until=self.config.sim_time_minutes)
+        for executor in self.executors:
+            executor.flush()
         
         return self._collect_simple_results()
 
@@ -508,81 +457,48 @@ class SimulationEngineNoRest:
                 if node.station not in node.required_tools:
                     node.required_tools.append(node.station)
     
-    def _pipeline_controller(self) -> Generator:
-        """流水线控制器"""
-        engine_id = 0
-        max_engines = self.config.target_output + 2
-        
+    def _pipeline_controller(self):
         start_nodes = self.scheduler.get_start_nodes()
         if not start_nodes:
             return
-        
-        first_node = self.scheduler.get_node(start_nodes[0])
-        min_workers_needed = first_node.required_workers if first_node else 1
-        first_task_duration = first_node.std_duration if first_node else 30
-        
-        while engine_id < max_engines and self.env.now < self.config.sim_time_minutes:
-            available_workers = self.worker_pool.get_available_count()
-            
-            if available_workers >= min_workers_needed:
-                engine_id += 1
-                self.engine_start_times[engine_id] = self.env.now
-                self.env.process(self._engine_process(engine_id))
-                yield self.env.timeout(first_task_duration * 0.5)
-            else:
-                yield self.env.timeout(10)
-    
-    def _single_engine_process(self, start_engine_id: int) -> Generator:
-        """单台发动机模式（串行生产）"""
-        engine_id = start_engine_id
-        max_engines = self.config.target_output + 1
-        
-        while engine_id <= max_engines and self.env.now < self.config.sim_time_minutes:
-            self.engine_start_times[engine_id] = self.env.now
-            yield from self._engine_process(engine_id)
-            engine_id += 1
-    
-    def _engine_process(self, engine_id: int) -> Generator:
-        """单台发动机生产流程"""
-        completed: Set[str] = set()
-        running: Set[str] = set()
-        total_tasks = self.scheduler.get_node_count()
-        
-        executor = TaskExecutor(
-            self.env,
-            self.config,
-            self.worker_pool,
-            self.equipment_mgr,
-            self.event_collector
-        )
-        
-        def on_task_complete(step_id: str):
-            running.discard(step_id)
+        first = self.scheduler.get_node(start_nodes[0])
+        interval = release_interval(self.process, first)
+        eid = 0
+        while self.env.now < self.config.sim_time_minutes:
+            eid += 1
+            self.engine_start_times[eid] = self.env.now
+            self.env.process(self._engine_process(eid))
+            yield self.env.timeout(interval)
+
+    def _single_engine_process(self, start_engine_id):
+        eid = start_engine_id
+        while self.env.now < self.config.sim_time_minutes:
+            self.engine_start_times[eid] = self.env.now
+            yield from self._engine_process(eid)
+            eid += 1
+
+    def _engine_process(self, engine_id):
+        completed, running = set(), set()
+        signal = self.env.event()
+        executor = TaskExecutor(self.env, self.config, self.worker_pool, self.equipment_mgr, self.event_collector)
+        self.executors.append(executor)
+
+        def on_task_complete(step_id):
+            nonlocal signal
             completed.add(step_id)
-        
-        while len(completed) < total_tasks:
-            if self.env.now >= self.config.sim_time_minutes:
-                break
-            
-            ready_tasks = self.scheduler.get_ready_nodes(completed)
-            ready_tasks = [t for t in ready_tasks if t not in running]
-            
-            for step_id in ready_tasks:
-                node = self.scheduler.get_node(step_id)
-                if node:
-                    running.add(step_id)
-                    self.env.process(
-                        self._execute_and_complete(
-                            engine_id, node, executor, on_task_complete
-                        )
-                    )
-            
-            yield self.env.timeout(0.1)
-        
-        if len(completed) == total_tasks:
-            self.engine_end_times[engine_id] = self.env.now
-            self.engines_completed += 1
-    
+            old, signal = signal, self.env.event()
+            if not old.triggered:
+                old.succeed()
+
+        while len(completed) < self.scheduler.get_node_count():
+            for sid in self.scheduler.get_ready_nodes(completed):
+                if sid not in running:
+                    running.add(sid)
+                    self.env.process(self._execute_and_complete(engine_id, self.scheduler.get_node(sid), executor, on_task_complete))
+            yield signal
+        self.engine_end_times[engine_id] = self.env.now
+        self.engines_completed += 1
+
     def _execute_and_complete(self, engine_id, node, executor, callback) -> Generator:
         """执行任务并触发回调"""
         yield from executor.execute_task(engine_id, node)
@@ -608,10 +524,13 @@ class SimulationEngineNoRest:
         quality_data = self.event_collector.get_quality_stats()
         
         return {
+            "engine_completion_events": [dict(engine_id=eid, end_time=t) for eid,t in sorted(self.engine_end_times.items())],
+            "evaluation_context": labor_summary(self.event_collector.get_all_events()),
             "engines_completed": self.engines_completed,
             "avg_cycle_time": avg_cycle_time,
             "sim_duration": sim_duration,
             "avg_worker_utilization": sum(worker_utilizations) / len(worker_utilizations) if worker_utilizations else 0,
             "total_rest_time": 0,  # 无休息
-            "first_pass_rate": quality_data["first_pass_rate"]
+            "first_pass_rate": quality_data["first_pass_rate"],
+            "quality_stats": quality_data
         }

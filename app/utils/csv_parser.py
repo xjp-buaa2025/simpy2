@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from app.models.enums import OpType
 from app.models.process_model import ProcessNode, ProcessDefinition
 from app.models.gantt_model import GanttEvent, GANTT_CSV_HEADERS
+from app.utils.process_file_parser import ProcessFileError, parse_process_text
 
 
 # 工艺流程CSV表头
@@ -31,7 +32,9 @@ CSV_HEADERS = [
     "rework_prob",
     "required_workers",
     "required_tools",
-    "station"
+    "station",
+    "area_id",
+    "workstation_id"
 ]
 
 # CSV模板示例数据
@@ -79,70 +82,11 @@ def parse_process_csv(
     Returns:
         ParseResult解析结果
     """
-    result = ParseResult(success=False)
-    nodes = []
-    
     try:
-        reader = csv.DictReader(io.StringIO(content))
-        
-        for row_num, row in enumerate(reader, start=2):
-            try:
-                # 解析required_tools
-                tools_str = row.get('required_tools', '').strip()
-                tools = []
-                if tools_str:
-                    tools = [t.strip() for t in tools_str.split(';') if t.strip()]
-                
-                # 解析op_type
-                op_type_str = row.get('op_type', 'A').strip().upper()
-                try:
-                    op_type = OpType(op_type_str)
-                except ValueError:
-                    result.warnings.append(
-                        f"第{row_num}行: 未知操作类型 '{op_type_str}'，使用默认值 'A'"
-                    )
-                    op_type = OpType.A
-                
-                # 创建节点
-                node = ProcessNode(
-                    step_id=row.get('step_id', '').strip(),
-                    task_name=row.get('task_name', '').strip(),
-                    op_type=op_type,
-                    predecessors=row.get('predecessors', '').strip(),
-                    std_duration=float(row.get('std_duration', 0) or 0),
-                    time_variance=float(row.get('time_variance', 0) or 0),
-                    work_load_score=int(row.get('work_load_score', 5) or 5),
-                    rework_prob=float(row.get('rework_prob', 0) or 0),
-                    required_workers=int(row.get('required_workers', 1) or 1),
-                    required_tools=tools,
-                    station=row.get('station', 'ST01').strip() or 'ST01'
-                )
-                
-                # 验证必填字段
-                if not node.step_id:
-                    result.errors.append(f"第{row_num}行: step_id不能为空")
-                    continue
-                if not node.task_name:
-                    result.errors.append(f"第{row_num}行: task_name不能为空")
-                    continue
-                
-                nodes.append(node)
-                result.parsed_count += 1
-                
-            except Exception as e:
-                result.errors.append(f"第{row_num}行解析错误: {str(e)}")
-        
-        # 检查是否有解析成功的节点
-        if nodes:
-            result.process = ProcessDefinition(nodes=nodes)
-            result.success = len(result.errors) == 0
-        else:
-            result.errors.append("没有成功解析任何节点")
-        
-    except Exception as e:
-        result.errors.append(f"CSV解析失败: {str(e)}")
-    
-    return result
+        process = parse_process_text(content)
+        return ParseResult(success=True, process=process, parsed_count=len(process.nodes))
+    except ProcessFileError as error:
+        return ParseResult(success=False, errors=error.errors)
 
 
 def parse_csv_file(file_content: bytes) -> ParseResult:
@@ -189,7 +133,7 @@ def export_process_csv(process: ProcessDefinition) -> str:
     
     # 写入数据
     for node in process.nodes:
-        writer.writerow(node.to_csv_row())
+        writer.writerow(node.to_csv_row() + [node.area_id, node.workstation_id])
     
     return output.getvalue()
 
@@ -268,7 +212,7 @@ def generate_template_csv() -> str:
     
     # 写入示例数据
     for row in CSV_TEMPLATE_DATA:
-        writer.writerow(row)
+        writer.writerow(row + ["", ""])
     
     return output.getvalue()
 
