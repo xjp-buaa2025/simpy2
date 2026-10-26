@@ -154,3 +154,16 @@ test('saved station labels and counts are rendered as text',()=>{
     assert.doesNotMatch(element('stationProgressRows').innerHTML,/<img|<script/);
     assert.match(element('stationProgressRows').innerHTML,/&lt;img/);
 });
+
+test('Unity follow samples the same run and refuses mixed-run clocks',async()=>{
+    const {c,element}=context();c.fixture={sim_id:'run',station_progress:timeline()};
+    vm.runInContext('stationProgressView.result=fixture',c);
+    element('stationUnityFollow').checked=true;element('stationProgressEngine').value='1';
+    c.fetch=async()=>({ok:true,json:async()=>({sim_id:'other',minute:10,playing:false,controller_connected:true})});
+    await c.followUnityTime();assert.match(element('stationUnityStatus').textContent,/结果不一致/);
+    assert.equal(element('stationProgressRows').innerHTML,'');
+    c.fetch=async()=>({ok:true,json:async()=>({sim_id:'run',minute:10,playing:false,controller_connected:true})});
+    await c.followUnityTime();assert.match(element('stationProgressRows').innerHTML,/25\.0%/);
+    assert.match(element('stationUnityStatus').textContent,/已暂停/);
+    c.stopUnityTimeFollow();assert.equal(element('stationUnityFollow').checked,false);assert.equal(element('stationProgressTime').disabled,false);
+});

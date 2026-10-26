@@ -62,6 +62,8 @@ body{height:100vh;min-height:0;overflow:hidden;background:#f3f6fa;font:14px/1.5 
 .station-progress-controls{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:14px}
 .station-progress-controls label{display:flex;flex-direction:column;gap:6px;color:#52677f;font-size:12px}
 .station-progress-controls select,.station-progress-controls input{min-width:190px}
+.station-progress-controls .station-unity-follow{flex-direction:row;align-items:center;align-self:center;font-size:14px}
+.station-progress-controls input[type="checkbox"]{min-width:0;width:auto;margin:0}
 .station-progress-table{margin-top:14px;max-height:480px;overflow:auto}
 .station-progress-table th{position:sticky;top:0;background:#f6f9fd;z-index:1}
 .station-progress-reading{display:flex;align-items:center;gap:12px;white-space:nowrap;font-variant-numeric:tabular-nums}

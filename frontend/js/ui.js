@@ -130,7 +130,7 @@ function renderEquipmentList() {
                 <button class="btn btn-danger" style="padding: 0.25rem 0.5rem;" onclick="removeEquipment('${name}')">×</button>
             </div>
         </div>
-    `).join('');
+    `).join('') || '<p class="muted">无</p>';
 }
 
 // 添加设备

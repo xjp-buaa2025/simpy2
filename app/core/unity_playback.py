@@ -19,6 +19,7 @@ class UnityPlaybackClock:
         self._wall = wall
         self._lock = threading.RLock()
         self.sim_id = ""
+        self.publication_id = ''
         self.duration = 0.0
         self.minute = 0.0
         self.playing = False
@@ -30,11 +31,15 @@ class UnityPlaybackClock:
         self.lease_seconds = 12.0
 
     def _refresh(self):
-        sim_id, duration = self._metadata()
+        metadata=self._metadata()
+        sim_id, duration = metadata[:2]
+        publication_id=metadata[2] if len(metadata)>2 else ''
         now = self._now()
-        if sim_id != self.sim_id:
+        if sim_id != self.sim_id or publication_id!=self.publication_id:
             self.sim_id, self.duration = sim_id, max(0.0, float(duration))
+            self.publication_id=publication_id
             self.minute, self.playing, self.anchor = 0.0, False, now
+            self.controller, self.lease_until = '', 0.0
             self.revision += 1
         if self.controller and now >= self.lease_until:
             # Freeze at lease expiry, not at the time the next viewer polls.

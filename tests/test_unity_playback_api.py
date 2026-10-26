@@ -25,7 +25,8 @@ def request(app, method, path, payload=None):
     return asyncio.run(invoke())
 
 
-def test_http_clock_claim_controls_and_read_only_viewer(monkeypatch):
+def test_http_clock_claim_controls_and_read_only_viewer(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIMPY_UNITY_ACTIVE_STORE", str(tmp_path / "active"))
     now = [10.0]
     clock = UnityPlaybackClock(lambda: ("api-run", 1000), lambda: now[0])
     monkeypatch.setattr(unity_playback, "clock", clock)

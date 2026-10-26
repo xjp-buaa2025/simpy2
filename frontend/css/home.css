@@ -1,12 +1,6 @@
 /* Home-only presentation; other workbench tabs keep their existing appearance. */
-body.home-active .header{background:#fff;color:#263b53;border-bottom:1px solid #e7ecf2}
-body.home-active .header h1{-webkit-text-fill-color:#263b53}
-body.home-active .brand-symbol{color:#286fe0;border-color:#dce5f2;background:#f3f7fc}
-body.home-active .header .btn-outline{color:#526883;border-color:#dce5ef}
-body.home-active #runState{color:#687c94}
-body.home-active .brand span:not(.brand-symbol){display:none}
 body.home-active .nav-note,body.home-active #workbenchStatus{display:none}
-#tab-home.active{display:flex;flex-direction:column;gap:28px;padding:32px 36px 20px;background:#f5f7fa;overflow:auto;position:relative}
+#tab-home.active{display:flex;flex-direction:column;gap:28px;padding:20px 36px 20px;background:#f5f7fa;overflow:auto;position:relative}
 .home-heading{display:flex;align-items:center;justify-content:space-between;gap:24px;min-height:70px;flex-shrink:0}
 .home-heading h2{font-size:32px;letter-spacing:1px;color:#243c58;font-weight:600;line-height:1.4;margin:0}
 .home-title-dot{color:#327eec;font-size:40px;margin-left:7px}
@@ -106,5 +100,4 @@ body.home-active .nav-note,body.home-active #workbenchStatus{display:none}
 /* Header seal is cropped to the circular emblem, excluding the source footer. */
 .brand>.brand-logo{display:block!important;position:relative;flex:0 0 46px;width:46px;height:46px;overflow:hidden;border-radius:50%;background:#fff}
 .brand-logo img{display:block;position:absolute;width:52px;height:52px;max-width:none;left:-3px;top:-3px;clip-path:circle(44% at 50% 50%)}
-.home-heading{justify-content:flex-end;min-height:40px}
 .home-function-panel{padding-top:18px}

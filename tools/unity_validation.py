@@ -302,13 +302,9 @@ def publish_result(result, process):
             # old 79-step replay or its shared playback clock.
             mapping = json.loads((ROOT / "tools/factory_process_mapping.json").read_text(encoding="utf-8"))
             if {row.get("step_id") for row in rows} != set(mapping):
-                atomic_write(OUTPUT / "station_progress.json", json.dumps(
-                    progress, ensure_ascii=False, allow_nan=False).encode("utf-8"))
-                return {"success": True, "sim_id": result["sim_id"],
-                        "mode": "station_progress_only", "legacy_replay_published": False,
-                        "station_progress_url": progress_url,
-                        "stations": len(progress["stations"]),
-                        "engines_completed": result["engines_completed"]}
+                from app.core.unity_active import publish
+                published=publish(result, process, OUTPUT/'active', OUTPUT/'station_progress.json')
+                return published
         payload = _build(result=result, rows=rows)
         atomic_write(OUTPUT / "current_result.json", json.dumps(
             {"success": True, "data": result}, ensure_ascii=False).encode("utf-8"))
@@ -319,6 +315,8 @@ def publish_result(result, process):
             atomic_write(OUTPUT / "station_progress.json", json.dumps(
                 progress, ensure_ascii=False, allow_nan=False).encode("utf-8"))
         _mark_ready(payload)
+        from app.core.unity_active import directory, atomic, encoded
+        atomic(pathlib.Path(os.getenv('SIMPY_UNITY_ACTIVE_STORE',str(OUTPUT/'active')))/"active.json",encoded(dict(schema_version=1,mode="legacy79",sim_id=payload["sim_id"],duration=payload.get("duration",0),profile_id="pt6a29-original",publication_id="legacy",replay_url="/api/simulation/unity/replay.json")))
         return {"success": True, "sim_id": payload["sim_id"],
                 "mode": "legacy_replay", "legacy_replay_published": True,
                 **({"station_progress_url": progress_url} if progress is not None else {}),

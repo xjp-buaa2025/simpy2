@@ -61,12 +61,7 @@ class GlobalConfig(BaseModel):
     
     # 关键设备配置（前端自定义）
     critical_equipment: Dict[str, int] = Field(
-        default={
-            "动平衡机": 2,
-            "试车台": 1,
-            "装配台": 3,
-            "检测台": 2
-        },
+        default_factory=dict,
         description="关键设备及数量"
     )
     
@@ -208,9 +203,6 @@ class GlobalConfig(BaseModel):
         
         
         # 检查设备配置
-        if not self.critical_equipment:
-            errors.append("至少需要配置一种关键设备")
-        
         for name, qty in self.critical_equipment.items():
             if qty < 1:
                 errors.append(f"设备 '{name}' 数量必须大于0")
@@ -226,12 +218,7 @@ class GlobalConfig(BaseModel):
             "example": {
                 "work_hours_per_day": 8,
                 "work_days_per_month": 22,
-                "critical_equipment": {
-                    "动平衡机": 2,
-                    "试车台": 1,
-                    "装配台": 3,
-                    "检测台": 2
-                },
+                "critical_equipment": {},
                 "rest_time_threshold": 50.0,
                 "rest_duration_time": 5.0,
                 "rest_load_threshold": 7,

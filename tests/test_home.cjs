@@ -25,18 +25,18 @@ const model=()=>({result:{engines_completed:5,avg_cycle_time:120,worker_stats:[{
     quality_stats:{total_inspections:1,first_pass_rate:0},completed_at:'2026-10-20'},config:{work_hours_per_day:8},evaluation:{mode:'capacity'},duration:480,
     process:{nodes:[{step_id:'one',station:'A'},{step_id:'two',area_id:'A'}]}});
 
-test('initial home is an isolated demo and has all eight working navigation categories',()=>{
+test('initial home has no invented metrics and has all eight working navigation categories',()=>{
     const {run,c,get}=setup(),before=JSON.stringify(c.state);
     run('initHome()');assert.equal(JSON.stringify(c.state),before);assert.equal(c.ganttView.model,null);
-    assert.equal(get('homeMetric-output').textContent,'12');assert.equal(get('homeMetricsNote').hidden,true);
+    assert.equal(get('homeMetric-output').textContent,'—');assert.equal(get('homeMetricsNote').hidden,false);
     for(const action of ['editor','config','run','overview','resources','human','gantt','files'])assert.ok(get('homeFunctions').innerHTML.includes(`data-home-action="${action}"`));
-    assert.equal(get('homeMetricsNote').textContent,'');
+    assert.ok(get('homeMetricsNote').textContent.includes('暂无仿真结果'));
 });
 
-test('real home metrics preserve zeros, use the result snapshot and exclude workstation utilization',()=>{
+test('real home metrics preserve zeros and include equipment and workstation utilization',()=>{
     const {run,c,get}=setup();c.ganttView.model=model();run('initHome()');
     assert.equal(get('homeMetric-output').textContent,'5');assert.equal(get('homeMetric-cycle').textContent,'2.0');
-    assert.equal(get('homeMetric-worker').textContent,'—');assert.equal(get('homeMetric-equipment').textContent,'75.0');
+    assert.equal(get('homeMetric-worker').textContent,'—');assert.equal(get('homeMetric-equipment').textContent,'42.5');
     assert.equal(get('homeMetric-pass').textContent,'0.0');assert.equal(get('homeModelSummary').textContent,'1 个工区 / 2 道工序');
     c.state.nodes.push({id:'new',station:'different'});c.isCapacityStale=()=>true;run('refreshHome()');
     assert.equal(get('homeMetric-output').textContent,'5');assert.ok(get('homeRunStatus').textContent.includes('待重算'));

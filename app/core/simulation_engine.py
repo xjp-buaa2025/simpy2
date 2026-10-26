@@ -23,6 +23,7 @@ import numpy as np
 from app.core.run_progress import attach_progress_observer
 from app.core.production_policy import validate_production_process, release_interval, labor_summary
 from app.core.station_progress import build_station_progress
+from app.core.area_statistics import build_plan_area_statistics
 
 from app.models.config_model import GlobalConfig
 from app.models.process_model import ProcessDefinition
@@ -311,6 +312,10 @@ class SimulationEngine:
             "work_hours_per_day": self.config.work_hours_per_day
         }
         
+        area_stats, area_completion_events = build_plan_area_statistics(
+            config=self.config, process=self.process,
+            gantt_events=self.event_collector.get_all_events(),
+            task_completion_events=self.event_collector.task_completion_events)
         return SimulationResult(
             sim_id=self.sim_id,
             status=SimulationStatus.COMPLETED,
@@ -324,6 +329,7 @@ class SimulationEngine:
             quality_stats=quality_stats,
             human_factors_stats=human_factors_stats,
             gantt_events=self.event_collector.get_all_events(),
+            area_stats=area_stats, area_completion_events=area_completion_events,
             time_mapping=time_mapping,
             created_at=datetime.now().isoformat(),
             engine_completion_events=[dict(engine_id=eid, end_time=t) for eid,t in sorted(self.engine_end_times.items())],

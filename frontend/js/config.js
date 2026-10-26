@@ -62,14 +62,7 @@ const stationContainers = {};
 const DEFAULT_CONFIG = {
     workHoursPerDay: 8,
     workDaysPerMonth: 22,
-    criticalEquipment: {
-        '动平衡机': 2,
-        '检测台': 2,
-        '叶片安装夹具': 3,
-        '液压拉伸器': 2,
-        '感应加热器': 2,
-        '起重设备': 1
-    },
+    criticalEquipment: {},
     restTimeThreshold: 50,
     restDurationTime: 5,
     restLoadThreshold: 7,

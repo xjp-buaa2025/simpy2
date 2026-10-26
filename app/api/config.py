@@ -98,9 +98,6 @@ async def validate_config(config: GlobalConfig):
     
     
     # 检查关键设备
-    if not config.critical_equipment:
-        errors.append("至少需要配置一种关键设备")
-    
     for equip_name, quantity in config.critical_equipment.items():
         if quantity < 1:
             errors.append(f"设备 '{equip_name}' 数量必须大于0")

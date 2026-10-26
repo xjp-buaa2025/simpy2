@@ -55,10 +55,12 @@ function renderStationProgressPage(){
     }
 }
 function initStationProgress(result) {
+    stopUnityTimeFollow();
     stationProgressView.result = result;stationProgressView.token++;
     const select = document.getElementById('stationProgressEngine'), time = document.getElementById('stationProgressTime'), status = document.getElementById('stationProgressStatus'), button = document.getElementById('stationProgressQuery');
     if (!select || !time || !status || !button) return;
     const source = result.station_progress, available = Array.isArray(source?.stations);
+    initUnityResultControls(available);
     select.innerHTML = '<option value="">全部发动机</option>';
     for (const id of new Set((source?.stations || []).flatMap(s => (s.engines || []).map(e => String(e.engine_id))))) {
         const option = document.createElement('option');option.value = id;option.textContent = id;select.appendChild(option);
@@ -71,6 +73,46 @@ function initStationProgress(result) {
     // The run response already carries the final snapshot, avoiding an extra initial request.
     renderStationProgress(source);
     status.textContent = `仿真第 ${source.time_minutes} 分钟 · 按已放行工序的标准工时累计，完成状态以全部工序放行为准。`;
+}
+
+let unityFollowTimer=null, unityFollowBusy=false;
+function stopUnityTimeFollow(){
+    if(unityFollowTimer)clearInterval(unityFollowTimer);
+    unityFollowTimer=null;
+    const checkbox=document.getElementById('stationUnityFollow');if(checkbox)checkbox.checked=false;
+    for(const id of ['stationProgressTime','stationProgressQuery']){const el=document.getElementById(id);if(el)el.disabled=false;}
+}
+function initUnityResultControls(available){
+    const status=document.getElementById('stationProgressStatus');if(!status)return;
+    let controls=document.getElementById('stationUnityControls');
+    if(!controls){
+        controls=document.createElement('div');controls.id='stationUnityControls';controls.className='station-progress-controls';
+        controls.innerHTML='<label class="station-unity-follow"><input id="stationUnityFollow" type="checkbox"> 跟随 Unity 时间</label> <button id="stationUnityPublish" class="btn btn-secondary" type="button">同步此结果到 Unity</button><span id="stationUnityStatus" role="status"></span>';
+        status.before(controls);
+    }
+    const checkbox=document.getElementById('stationUnityFollow');checkbox.disabled=!available;
+    checkbox.onchange=()=>{stationProgressView.token++;if(checkbox.checked){for(const id of ['stationProgressTime','stationProgressQuery'])document.getElementById(id).disabled=true;followUnityTime();unityFollowTimer=setInterval(followUnityTime,1000);}else stopUnityTimeFollow();};
+    document.getElementById('stationUnityPublish').onclick=async()=>{
+        const result=stationProgressView.result,button=document.getElementById('stationUnityPublish'),label=document.getElementById('stationUnityStatus');
+        if(!result)return;button.disabled=true;
+        try{const response=await fetch(`/api/results/${encodeURIComponent(result.sim_id)}/publish-unity`,{method:'POST'});const data=await response.json();if(!response.ok||!data.success)throw Error(data.detail||data.message||'同步失败');label.textContent=data.message;}
+        catch(error){label.textContent='同步失败：'+error.message;}
+        finally{button.disabled=false;}
+    };
+}
+async function followUnityTime(){
+    if(unityFollowBusy)return;unityFollowBusy=true;
+    const result=stationProgressView.result,label=document.getElementById('stationUnityStatus');
+    try{
+        const response=await fetch('/api/simulation/unity/playback.json',{cache:'no-store'});if(!response.ok)throw Error('共享时钟连接失败');const clock=await response.json();
+        if(stationProgressView.result!==result||!document.getElementById('stationUnityFollow')?.checked)return;
+        if(clock.sim_id!==result.sim_id){label.textContent=`结果不一致：网页 ${result.sim_id}；Unity ${clock.sim_id}。请先同步此结果。`;return;}
+        const minute=Math.max(0,Math.min(result.station_progress.time_minutes,clock.minute));document.getElementById('stationProgressTime').value=minute.toFixed(3);
+        renderStationProgress(sampleStationProgress(result.station_progress,minute,document.getElementById('stationProgressEngine').value));
+        document.getElementById('stationProgressStatus').textContent=`仿真第 ${minute.toFixed(3)} 分钟 · 按已放行工序的标准工时累计，完成状态以全部工序放行为准。`;
+        label.textContent=`跟随PC · ${minute.toFixed(2)} 分钟 · ${clock.playing?'播放中':'已暂停'}${clock.controller_connected?'':' · PC未连接'}`;
+    }catch(error){if(label)label.textContent='跟随中断：'+error.message;}
+    finally{unityFollowBusy=false;}
 }
 async function queryStationProgress() {
     const view = stationProgressView, result = view.result, source = result?.station_progress;

@@ -197,10 +197,7 @@ function loadComplexExample(force = false) {
     document.getElementById('restLoadThreshold').value = 5;   // 负荷触发阈值(REBA)
     document.getElementById('restDurationLoad').value = 10;   // 负荷触发休息时长(分钟)
 
-    // 关键设备：试车台 x1
-    state.config.criticalEquipment = {
-        '试车台': 1
-    };
+    state.config.criticalEquipment = {};
     renderEquipmentList();
 
     showToast(`基础案例已加载（${COMPLEX_PROCESS_NODES.length}个节点）`, 'success');

@@ -61,6 +61,8 @@ def test_new_replay_rejects_stale_controls(setup_clock):
     assert not fresh["playing"]
     with pytest.raises(PlaybackConflict):
         clock.control("pc", "run-a", state["revision"], minute=45)
+    assert not fresh['controller_connected']
+    clock.claim('pc')
     send(clock, playing=True)
     now[0] += 2
     assert clock.snapshot()["minute"] == 20

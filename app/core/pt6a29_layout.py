@@ -67,6 +67,7 @@ def route_errors(document):
 
 class PhysicalLayoutStore:
     def __init__(self, directory=None, replay_path=None):
+        self.use_active = replay_path is None
         self.directory = Path(directory or os.getenv('SIMPY_PHYSICAL_LAYOUT_STORE', ROOT / 'results/physical_layout/pt6a29-original'))
         self.replay_path = Path(replay_path or os.getenv('SIMPY_REPLAY_PATH', ROOT / 'results/unity_validation/replay.json'))
         self.lock = threading.RLock()
@@ -84,6 +85,9 @@ class PhysicalLayoutStore:
 
     @property
     def replay(self):
+        from app.core.unity_active import directory, snapshot
+        if self.use_active and (directory()/'active.json').exists():
+            return snapshot()
         return load_json(self.replay_path)
 
     def parse(self, filename, content):
@@ -141,6 +145,7 @@ class PhysicalLayoutStore:
         zones = {z['station_id']: z for z in base['zones']}
         normalized = copy.deepcopy(base); slots, seen, changes = [], set(), []
         current_slots = {s['id']: s for s in current['slots']}
+        live_replay=self.replay if self.use_active else {}
         for raw in rows:
             if not isinstance(raw, dict):
                 errors.append(issue('', 'slots', '设备实例必须是对象')); continue
@@ -183,6 +188,8 @@ class PhysicalLayoutStore:
             row['_corners'] = corners
             if any(abs(row[k] - current_slots[sid][k]) > .0001 for k in ['x', 'z', 'yaw']):
                 affected = [b['step_id'] for b in base['bindings'] if b['slot_id'] == sid]
+                if live_replay.get('schema_version')==4:
+                    affected=[n['step_id'] for n in live_replay['process']['nodes'] if (n.get('workstation_id') or n.get('area_id') or n.get('station'))==row['zone_id']]
                 changes.append(dict(slot_id=sid, station_id=row['zone_id'], affected_steps=affected,
                                     message=f'{sid}共享设备；影响工序：' + ('、'.join(affected) or '暂无旧流程任务')))
             slots.append(row)
@@ -208,13 +215,21 @@ class PhysicalLayoutStore:
 
     def snapshot(self, layout=None):
         document = copy.deepcopy(layout or self.current)
-        replay_bytes = self.replay_path.read_bytes()
-        digest = hashlib.sha256(replay_bytes).hexdigest()
-        replay = json.loads(replay_bytes)
+        from app.core.unity_active import directory,active
+        info=active() if self.use_active and (directory()/'active.json').exists() else None
+        if info and info['mode']=='pt6a29':
+            digest=info['sha256'];sim_id=info['sim_id'];replay=None
+        else:
+            replay_bytes=self.replay_path.read_bytes();digest=hashlib.sha256(replay_bytes).hexdigest();replay=json.loads(replay_bytes);sim_id=replay['sim_id']
         key = (document['revision'], digest)
         if key not in self.cache:
+            replay=replay or self.replay
+            if replay.get('schema_version')==4:
+                pairs={}
+                for trip in replay['transfers']:pairs.setdefault((trip['source_station'],trip['target_station']),trip)
+                replay=dict(transfers=list(pairs.values()))
             self.cache = {key: reroutes(document, replay)}
-        document['sim_id'] = replay['sim_id']
+        document['sim_id'] = sim_id
         document['replay_sha256'] = digest
         document['reroutes'] = copy.deepcopy(self.cache[key])
         return document
@@ -238,13 +253,15 @@ class PhysicalLayoutStore:
         if format == 'json':
             return json.dumps(self.snapshot(), ensure_ascii=False, indent=2).encode('utf-8')
         from openpyxl import Workbook
+        live=self.replay
+        web=live.get('schema_version')==4
         book = Workbook(); sheet = book.active; sheet.title = '设备布局'; sheet.append(SLOT_HEADERS)
         for row in self.current['slots']:
             sheet.append([row[k] for k in SLOT_FIELDS])
         sheet.freeze_panes = 'E2'; sheet.auto_filter.ref = sheet.dimensions
         for col in sheet.columns:
             sheet.column_dimensions[col[0].column_letter].width = 26
-        for name, rows, fields in [('工序展示安置', self.current['bindings'], ['step_id', 'zone_id', 'slot_id', 'status']),
+        for name, rows, fields in [('旧模型模板绑定' if web else '工序展示安置', self.current['bindings'], ['step_id', 'zone_id', 'slot_id', 'status']),
                                     ('29工位及缓存区', self.current['zones'], ['station_id', 'label', 'u', 'v', 'width', 'depth'])]:
             reference = book.create_sheet(name); reference.append(fields)
             for row in rows:
@@ -253,8 +270,14 @@ class PhysicalLayoutStore:
             for col in reference.columns:
                 reference.column_dimensions[col[0].column_letter].width = 28
         notes = book.create_sheet('填写说明')
+        if web:
+            sheet=book.create_sheet('当前工步归属');sheet.append(['工步编号','所属物理工位','任务名称'])
+            for node in live['process']['nodes']:sheet.append([node['step_id'],node.get('workstation_id') or node.get('area_id') or node.get('station'),node['task_name']])
+            sheet.freeze_panes='A2'
+            for col in sheet.columns:sheet.column_dimensions[col[0].column_letter].width=30
+            notes.append(['当前工步归属来自网页已发布输入快照；旧模型模板绑定只供模型兼容，不是当前工艺映射。'])
         for text in ['仅修改X、Z和水平角度。共享设备的变更影响其全部绑定工序。',
-                     '保持设备和操作人员位置在所属29工位内。原79工序时间、人员记录和统计结果不修改。',
+                     '保持设备和操作人员位置在所属29工位内。网页真实工步时间、人员记录和统计结果不修改。',
                      '此表是展示安置表，不是已核定的工艺映射表。']:
             notes.append([text])
         notes.column_dimensions['A'].width = 100

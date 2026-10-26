@@ -13,7 +13,7 @@ const state = {
     stationFilter: null,
     showStationContainers: true,
     layoutMode: 'normal', // 'normal' 或 'station-only'
-    config: { ...DEFAULT_CONFIG }
+    config: { ...DEFAULT_CONFIG, criticalEquipment: {...DEFAULT_CONFIG.criticalEquipment} }
 };
 
 // 画布相关状态

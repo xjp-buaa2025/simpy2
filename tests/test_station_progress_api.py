@@ -78,25 +78,18 @@ def test_old_or_missing_result_never_fabricates_zero_progress(client):
     assert "重新仿真" in response.json()["detail"]
 
 
-def test_station_only_publication_keeps_all_legacy_files(tmp_path, monkeypatch):
+def test_station_publication_activates_new_snapshot_and_keeps_legacy_files(tmp_path, monkeypatch, client):
     monkeypatch.setattr(adapter, "OUTPUT", tmp_path)
-    player = tmp_path / "player.json"
-    monkeypatch.setattr(adapter, "PLAYER_REPLAY", player)
-    legacy = [tmp_path / name for name in ("replay.json", "current_result.json", "sync_status.json")] + [player]
-    for path in legacy:
-        path.write_bytes(b"legacy-snapshot")
-    def forbidden(**kwargs):
-        raise AssertionError("WS station publication invoked the legacy replay builder")
-    monkeypatch.setattr(adapter, "_build", forbidden)
-    process = SimpleNamespace(nodes=[SimpleNamespace(model_dump=lambda **kw: {
-        "step_id": "R01-01", "station": "WS-R01", "workstation_id": "WS-R01"})])
-    progress = {"schema_version": 1, "sim_id": "station-run", "stations": [{"station_id": "WS-R01"}]}
-    published = adapter.publish_result({"sim_id": "station-run", "engines_completed": 1,
-                                        "station_progress": progress}, process)
-    assert published["success"] and published["mode"] == "station_progress_only"
-    assert published["legacy_replay_published"] is False
-    assert json.loads((tmp_path / "station_progress.json").read_bytes()) == progress
-    assert all(path.read_bytes() == b"legacy-snapshot" for path in legacy)
+    monkeypatch.setenv("SIMPY_UNITY_ACTIVE_STORE",str(tmp_path/"active"))
+    monkeypatch.setattr(adapter,"PLAYER_REPLAY",tmp_path/"player.json")
+    legacy=[tmp_path/name for name in ("replay.json","current_result.json","sync_status.json","player.json")]
+    for path in legacy:path.write_bytes(b"legacy-snapshot")
+    run=run_result(client,publish=True)
+    assert run["unity_sync"]["success"] and run["unity_sync"]["mode"]=="pt6a29"
+    assert json.loads((tmp_path/"active/active.json").read_bytes())["sim_id"]==run["sim_id"]
+    assert all(path.read_bytes()==b"legacy-snapshot" for path in legacy)
+    published=client.post(f"/api/results/{run['sim_id']}/publish-unity")
+    assert published.status_code==200 and published.json()["success"]
 
 
 def test_failed_station_publication_does_not_replace_legacy_status(tmp_path, monkeypatch, client):

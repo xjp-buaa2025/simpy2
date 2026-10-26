@@ -32,3 +32,17 @@ test('Canvas DPR 1/2 uses logical hit coordinates and bounded viewport dimension
  }
 });
 test('invalid imported result is rejected before changing active state',()=>{const {validate}=require('../frontend/js/result_view.js');assert.throws(()=>validate({sim_duration:100,gantt_events:[e(10,5)]}));assert.throws(()=>validate({sim_duration:100,gantt_events:[e(0,1,{worker_ids:'wrong'})]}));assert.equal(validate({sim_duration:0,gantt_events:[]}),true);});
+
+test('plan area rows render without resource constraints and missing data explains recovery',()=>{
+ const elements={};const c=vm.createContext({console,window:{},capacityEscape:String,stationDisplayLabel:(id,label)=>label||id,ganttView:{},document:{addEventListener(){},getElementById:id=>elements[id]||=( {} ),querySelector:()=>null}});
+ for(const name of ['updateResults','showLoading','rejectCapacityResult','acceptCapacityResult','openNodeModal','closeNodeModal','saveNode','guardAreaTransition','validateCapacityRun','runSimulation','refreshAreaDraftState','switchTab'])c[name]=()=>{};
+ vm.runInContext(fs.readFileSync('frontend/js/workbench.js','utf8'),c);
+ c.renderResourceTable=()=>{};c.refreshWorkbenchStatus=()=>{};
+ c.ganttView.model={evaluation:{mode:'plan'},duration:60,config:{capacity_model:{enabled:false}},process:{nodes:[{step_id:'p',station:'A'}]},result:{engines_completed:1,avg_cycle_time:10,area_stats:[{area_id:'A',label:'预装工区',completed_units:2,effective_standard_minutes:10,avg_cycle_time:13,wip:1}]}};
+ vm.runInContext('renderSnapshotSummary()',c);
+ assert.ok(elements.areaResultRows.innerHTML.includes('预装工区'));
+ assert.ok(elements.areaResultRows.innerHTML.includes('<td>2</td><td>10.0</td><td>1</td>'));
+ c.ganttView.model.result.area_stats=[];vm.runInContext('renderSnapshotSummary()',c);
+ assert.ok(elements.areaResultRows.innerHTML.includes('无需启用工区资源模型'));
+ assert.ok(!elements.areaResultRows.innerHTML.includes('历史结果未记录工区统计'));
+});

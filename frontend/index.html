@@ -6,7 +6,7 @@
     <title>航空发动机装配排产仿真系统 - 北京航空航天大学</title>
     <script src="/static/vendor/chart.umd.min.js"></script>
     <link rel="stylesheet" href="css/styles.css?v=093f945cf1">
-    <link rel="stylesheet" href="css/workbench.css?v=result-paging-20261021">
+    <link rel="stylesheet" href="css/workbench.css?v=unity-follow-20261022">
     <link rel="stylesheet" href="css/home.css?v=area-serial-20261021">
     <link rel="preload" as="image" href="/static/assets/home-engine-poster.jpg">
     <script type="importmap">{"imports":{"three":"/static/vendor/three/three.module.js"}}</script>
@@ -45,11 +45,6 @@
 
         <main class="content">
             <div id="tab-home" class="tab-content home-page active">
-                <div class="home-heading">
-                    <div class="home-heading-actions">
-                        <button class="btn btn-secondary" id="homeDetailsToggle" onclick="toggleHomeDetails()" aria-expanded="false" aria-controls="homeResultDetails">结果详情</button>
-                    </div>
-                </div>
                 <div class="home-layout">
                     <section class="home-function-panel" aria-label="功能导航">
                         <div id="homeFunctions"></div>
@@ -203,7 +198,6 @@
                             <input type="number" id="workDaysPerMonth" value="22" min="1" max="31">
                         </div>
                     </div>
-                    <p class="muted">人员按需到岗；保留疲劳与休息规则。按评估时长统计实际产出。</p>
                 </div>
 
                 <div class="card">
@@ -264,17 +258,6 @@
             <!-- Tab: Results -->
             <div id="tab-results" class="tab-content">
                 <div id="unitySyncNotice" role="status" hidden style="margin-bottom: 16px; padding: 12px 16px; border: 1px solid #f59e0b; border-radius: 8px; color: #fbbf24;"></div>
-                <section class="card" id="stationProgressPanel" data-result-group="overview">
-                    <h3 class="card-title">工位进度</h3>
-                    <div class="station-progress-controls">
-                        <label>发动机<select id="stationProgressEngine" disabled><option value="">全部发动机</option></select></label>
-                        <label>仿真时间（分钟）<input id="stationProgressTime" type="number" min="0" step="any" placeholder="期末" disabled></label>
-                        <button class="btn btn-secondary" id="stationProgressQuery" disabled>查询进度</button>
-                    </div>
-                    <p class="muted" id="stationProgressStatus" role="status">运行仿真后查看各工位已放行进度。</p>
-                    <div class="resource-table station-progress-table"><table><thead><tr><th>工位编号与名称</th><th>发动机</th><th>标准工时进度</th><th>已放行工序</th><th>状态</th></tr></thead><tbody id="stationProgressRows"><tr><td colspan="5">暂无工位进度</td></tr></tbody></table></div>
-                    <div class="result-pager" id="stationProgressPager" hidden><button class="btn btn-secondary" id="stationProgressPrevious" onclick="changeStationProgressPage(-1)">上一页</button><span id="stationProgressPageLabel"></span><button class="btn btn-secondary" id="stationProgressNext" onclick="changeStationProgressPage(1)">下一页</button></div>
-                </section>
                 <div class="kpi-grid">
                     <div class="kpi-card">
                         <div class="kpi-label">评估期产出</div>
@@ -289,17 +272,9 @@
                         <div class="kpi-label">平均周期时间</div>
                         <div class="kpi-value"><span id="kpiCycleTime">-</span><span class="kpi-unit">小时</span></div>
                     </div>
-                    <div class="kpi-card purple">
-                        <div class="kpi-label">一次通过率</div>
-                        <div class="kpi-value"><span id="kpiPassRate">-</span><span class="kpi-unit">%</span></div>
-                    </div>
                     <div class="kpi-card red">
                         <div class="kpi-label">总休息时间</div>
                         <div class="kpi-value"><span id="kpiRestTime">-</span><span class="kpi-unit">分钟</span></div>
-                    </div>
-                    <div class="kpi-card cyan">
-                        <div class="kpi-label">高强度任务暴露</div>
-                        <div class="kpi-value"><span id="kpiHighIntensity">-</span><span class="kpi-unit">次</span></div>
                     </div>
                 </div>
 
@@ -327,7 +302,7 @@
                         <div class="result-pager" id="workerChartPager" hidden><button class="btn btn-secondary" id="workerChartPrevious" onclick="changeWorkerChartPage(-1)">上一页</button><span id="workerChartPageLabel"></span><button class="btn btn-secondary" id="workerChartNext" onclick="changeWorkerChartPage(1)">下一页</button></div>
                     </div>
                     <div class="chart-container">
-                        <div class="chart-title"> 设备利用率（分钟）</div>
+                        <div class="chart-title"> 设备/工位占用率（分钟）</div>
                         <canvas id="equipmentChart"></canvas>
                     </div>
                 </div>
@@ -498,26 +473,25 @@
     </div>
 
     <input type="file" id="csvFileInput" accept=".csv,.xlsx" style="display: none;" onchange="handleCSVImport(event)">
-    <script src="js/config.js?v=area-serial-20261021"></script>
-    <script src="js/state.js?v=bb57147a37"></script>
+    <script src="js/config.js?v=current-scenario-20261022"></script>
+    <script src="js/state.js?v=current-scenario-20261022"></script>
     <script src="js/data.js?v=58771194ca"></script>
     <script src="js/utils.js?v=a8c27d134a"></script>
     <script src="js/simulation_progress.js?v=73c6b9ab9d"></script>
     <script src="js/canvas.js?v=station-progress2"></script>
     <script src="js/editor.js?v=station-progress2"></script>
-    <script src="js/layout.js?v=station-progress2"></script>
+    <script src="js/layout.js?v=current-scenario-20261022"></script>
     <script src="js/csv.js?v=station-progress2"></script>
     <script src="js/result_view.js?v=station-progress2"></script>
-    <script src="js/station_progress_view.js?v=result-paging-20261021"></script>
     <script src="js/simulation.js?v=result-paging-20261021"></script>
     <script src="js/analysis.js?v=station-progress2"></script>
     <script src="js/charts.js?v=result-paging-20261021"></script>
-    <script src="js/ui.js?v=2512dcde4d"></script>
-    <script src="js/main.js?v=6341b01829"></script>
+    <script src="js/ui.js?v=current-scenario-20261022"></script>
+    <script src="js/main.js?v=current-scenario-20261022"></script>
     <script src="js/capacity.js?v=area-serial-20261021"></script>
     <script src="js/gantt_view.js?v=area-serial-20261021"></script>
     <script src="js/workbench.js?v=area-serial-20261021"></script>
     <script type="module" src="js/home_engine.js?v=4fcbd67e36"></script>
-    <script src="js/home.js?v=area-serial-20261021"></script>
+    <script src="js/home.js?v=current-scenario-20261022"></script>
 </body>
 </html>

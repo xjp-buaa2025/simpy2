@@ -21,6 +21,7 @@ from typing import Dict, List, Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from app.core.area_statistics import with_plan_area_statistics
 
 router = APIRouter()
 
@@ -125,7 +126,7 @@ async def get_simulation_result(sim_id: str):
     return APIResponse(
         success=True,
         message="获取结果成功",
-        data=result.model_dump()
+        data=with_plan_area_statistics(result.model_dump())
     )
 
 
@@ -148,6 +149,20 @@ def get_station_progress(
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return APIResponse(success=True, message="获取工位进度成功", data=data)
+
+
+@router.post("/{sim_id}/publish-unity", response_model=APIResponse)
+def publish_unity_result(sim_id:str):
+    result=simulation_results.get(sim_id)
+    if result is None:raise HTTPException(404,'仿真结果不存在')
+    data=with_plan_area_statistics(result.model_dump())
+    if not data.get('input_snapshot',{}).get('process'):raise HTTPException(409,'历史结果缺少工艺快照，请重新仿真')
+    from tools.unity_validation import publish_result
+    from app.models.process_model import ProcessDefinition
+    try:
+        published=publish_result(data,ProcessDefinition(**data['input_snapshot']['process']))
+        return APIResponse(success=True,message='结果已发布，Unity将从第0分钟暂停载入',data=published)
+    except ValueError as error:raise HTTPException(422,str(error)) from error
 
 
 @router.get("/list/all", response_model=APIResponse)
@@ -446,6 +461,7 @@ async def export_report(sim_id: str):
     bottleneck_analysis = analyze_bottlenecks(result)
     
     # 构建报告
+    area_result = with_plan_area_statistics(result.model_dump())
     report = {
         "report_info": {
             "sim_id": sim_id,
@@ -462,6 +478,8 @@ async def export_report(sim_id: str):
             "total_sim_time": f"{result.sim_duration / 60:.2f} 小时"
         },
         "evaluation_context": result.evaluation_context,
+        "area_stats": area_result["area_stats"],
+        "area_completion_events": area_result["area_completion_events"],
         "engine_completion_events": result.engine_completion_events,
         "station_progress": result.station_progress,
         "quality_stats": result.quality_stats.model_dump(),

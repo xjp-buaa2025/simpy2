@@ -1,5 +1,4 @@
-/* Home is a read-only overview. Demonstration values never enter simulation state. */
-const HOME_DEMO = Object.freeze({output:12,cycle:16.4,worker:12,equipment:74.2,pass:96.8,nodes:79,areas:11});
+/* Home reports the latest real result snapshot. Missing metrics stay empty. */
 const homeView = {ready:false,model:null,overview:null,motion:true};
 const HOME_AREAS = [
     {id:'ST01',name:'物料入库',x:105,y:175}, {id:'ST03',name:'压气机装配',x:418,y:126},
@@ -37,7 +36,7 @@ function buildHomeOverview(model) {
     return {output:Number.isFinite(r.engines_completed)?r.engines_completed:null,
         cycle:r.engines_completed>0&&Number.isFinite(r.avg_cycle_time)?r.avg_cycle_time/60:null,
         worker:Number.isFinite(r.evaluation_context?.peak_working_workers)?r.evaluation_context.peak_working_workers:(typeof getLaborMetrics==='function'?getLaborMetrics(r).peak_working_workers:null),
-        equipment:homeUtilization(r.equipment_stats,r.avg_equipment_utilization,true),
+        equipment:homeUtilization(r.equipment_stats,r.avg_equipment_utilization),
         pass:quality.total_inspections>0&&Number.isFinite(quality.first_pass_rate)?quality.first_pass_rate*100:null,
         nodes:nodes.length||null,areas:new Set(nodes.map(n=>n.area_id||n.station).filter(Boolean)).size||null};
 }
@@ -49,7 +48,7 @@ function initHome() {
         ['gantt','排产甘特','产品 · 人员 · 工位'],['files','方案管理','CSV / XLSX / JSON 导入导出']];
     homeElement('homeFunctions').innerHTML=entries.map(([action,label])=>`<button class="home-function" data-home-action="${action}"><span class="home-function-icon">${homeIcon(action)}</span><span class="home-function-copy"><b>${label}</b></span><span class="home-function-arrow" aria-hidden="true">›</span></button>`).join('');
     const metrics=[['output','评估期产出','台','output'],['cycle','平均周期','小时','clock'],
-        ['worker','峰值同时作业人数','人','human'],['equipment','设备利用率','%','equipment'],['pass','一次通过率','%','check']];
+        ['worker','峰值同时作业人数','人','human'],['equipment','设备/工位占用率','%','equipment'],['pass','一次通过率','%','check']];
     homeElement('homeMetrics').innerHTML=metrics.map(([key,label,unit,icon])=>`<div class="home-metric"><div class="home-metric-label"><span>${label}</span>${homeIcon(icon)}</div><div class="home-metric-number"><strong id="homeMetric-${key}">—</strong><span id="homeUnit-${key}">${unit}</span></div>${['equipment','pass'].includes(key)?`<div class="home-metric-track" aria-hidden="true"><i id="homeTrack-${key}"></i></div>`:''}</div>`).join('');
     document.querySelectorAll('[data-home-action]').forEach(button=>button.addEventListener('click',()=>homeNavigate(button.dataset.homeAction)));
     document.querySelectorAll('[data-home-area]').forEach(button=>{
@@ -75,9 +74,9 @@ function refreshHome() {
     const active=homeElement('tab-home').classList.contains('active');
     document.body.classList.toggle('home-active',active);
     if(!active){syncHomeMotion();return;}
-    const real=!!model,values=real?homeView.overview:HOME_DEMO;
-    homeElement('homeMetricsNote').textContent=real?'基于同一次仿真的结果快照':'';
-    homeElement('homeMetricsNote').hidden=!real;
+    const real=!!model,values=real?homeView.overview:{nodes:state.nodes.length,areas:state.stations.length};
+    homeElement('homeMetricsNote').textContent=real?'基于同一次仿真的结果快照':'暂无仿真结果，运行后显示实际数据';
+    homeElement('homeMetricsNote').hidden=false;
     for(const key of ['output','cycle','worker','equipment','pass']){
         const value=values[key],valid=Number.isFinite(value);
         homeElement(`homeMetric-${key}`).textContent=valid?(key==='output'?String(value):value.toFixed(1)):'—';
@@ -85,7 +84,7 @@ function refreshHome() {
         const track=homeElement(`homeTrack-${key}`);if(track)track.style.width=valid?`${Math.max(0,Math.min(100,value))}%`:'0%';
     }
     const evaluation=real?model.evaluation:null;
-    homeElement('homeScenario').textContent=real?`${evaluation.mode==='capacity'?'能力评估':'计划仿真'} · ${Number.isFinite(model.duration)?(model.duration/60).toFixed(1)+' 工作小时':'评估时长未记录'}`:'22 工作日 × 8 小时';
+    homeElement('homeScenario').textContent=real?`${evaluation.mode==='capacity'?'能力评估':'计划仿真'} · ${Number.isFinite(model.duration)?(model.duration/60).toFixed(1)+' 工作小时':'评估时长未记录'}`:'尚未运行';
     homeElement('homeModelSummary').textContent=`${values.areas??'—'} 个工区 / ${values.nodes??'—'} 道工序`;
     homeElement('homeResultTime').textContent=real?(model.result.completed_at||model.result.created_at||'未记录'):'—';
     const busy=typeof workbenchBusy!=='undefined'&&workbenchBusy;

@@ -70,18 +70,15 @@ function updateResults(result) {
     unityNotice.textContent = syncFailed
         ? '网页仿真已完成，但 Unity 同步失败。Unity 保留上一次有效结果。原因：' + result.unity_sync.message
         : stationProgressOnly ? '工位进度数据就绪，可供 Unity 后续接入。' : '';
-    if (typeof initStationProgress === 'function') initStationProgress(result);
     // KPI指标
     document.getElementById('kpiEngines').textContent = result.engines_completed;
     const labor=getLaborMetrics(result);
     document.getElementById('kpiLaborMinutes').textContent=labor.labor_minutes.toFixed(1);
     document.getElementById('kpiPeakWorkers').textContent=labor.peak_working_workers;
     document.getElementById('kpiCycleTime').textContent = (result.avg_cycle_time / 60).toFixed(1);
-    document.getElementById('kpiPassRate').textContent = Number.isFinite(result.quality_stats.first_pass_rate) ? (result.quality_stats.first_pass_rate * 100).toFixed(1) : '暂无数据';
-    
+
     const hfStats = result.human_factors_stats || {};
     document.getElementById('kpiRestTime').textContent = (hfStats.total_rest_time || 0).toFixed(0);
-    document.getElementById('kpiHighIntensity').textContent = hfStats.total_high_intensity_exposure || 0;
     
     // 统计数据
     document.getElementById('statInspections').textContent = result.quality_stats.total_inspections;

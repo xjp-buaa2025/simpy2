@@ -15,6 +15,10 @@ _cached_metadata = ("", 0.0)
 
 def replay_metadata():
     global _cached_stamp, _cached_metadata
+    from app.core.unity_active import directory, active
+    if (directory()/'active.json').exists():
+        data=active()
+        return data['sim_id'],float(data['duration']),data['publication_id']
     try:
         stat = _replay_path.stat()
         stamp = (stat.st_mtime_ns, stat.st_size)
@@ -32,6 +36,7 @@ clock = UnityPlaybackClock(replay_metadata)
 
 class ControllerRequest(BaseModel):
     client_id: str
+    mode: str = 'legacy79'
 
 
 class ControlRequest(ControllerRequest):
@@ -50,6 +55,9 @@ def playback_state():
 @router.post("/playback/claim")
 def claim_controller(request: ControllerRequest):
     try:
+        from app.core.unity_active import directory, active
+        if (directory()/'active.json').exists() and active()['mode']!=request.mode:
+            raise PlaybackConflict('客户端回放模式与当前活动结果不一致，请升级或刷新客户端')
         return clock.claim(request.client_id)
     except PlaybackConflict as error:
         raise HTTPException(409, str(error))
@@ -60,7 +68,7 @@ def claim_controller(request: ControllerRequest):
 @router.put("/playback")
 def control_playback(request: ControlRequest):
     try:
-        return clock.control(**request.model_dump())
+        return clock.control(**request.model_dump(exclude={'mode'}))
     except PlaybackConflict as error:
         raise HTTPException(409, str(error))
     except ValueError as error:
